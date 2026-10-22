@@ -1,5 +1,5 @@
 import { Plus, TriangleAlert } from 'lucide-react'
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Link } from 'react-router'
 
 import type { Assignment, Occurrence } from '../api'
@@ -7,7 +7,16 @@ import { AssignmentRow } from '../components/AssignmentRow'
 import { useAssignmentDialog } from '../components/assignmentDialogContext'
 import { useEventDialog } from '../components/eventDialogContext'
 import { BlockError, Empty, Loading } from '../components/States'
-import { addDays, formatLongDate, formatMonthDay, formatTime, formatWeekday, plural, relativeDay } from '../dates'
+import {
+  addDays,
+  formatLongDate,
+  formatMonthDay,
+  formatTime,
+  formatWeekday,
+  nextChange,
+  plural,
+  relativeDay,
+} from '../dates'
 import { useCourses, useToday } from '../queries'
 
 const DAYS_AHEAD = 7
@@ -18,7 +27,9 @@ export function TodayPage() {
   const dialog = useAssignmentDialog()
   const data = today.data
 
-  const firstRun = courses.data?.length === 0 && data && !data.overdue.length && !data.due_today.length
+  // Only a truly empty start: someone with events but no courses yet still sees their schedule.
+  const firstRun =
+    courses.data?.length === 0 && data && !data.overdue.length && !data.due_today.length && !data.events.length
 
   return (
     <div className="page">
@@ -228,9 +239,32 @@ function WeekStrip({ data }: { data: ReturnType<typeof useToday>['data'] }) {
   )
 }
 
+/**
+ * The current time, re-read at each of `times` (ms) as it passes, so time-based labels
+ * like "Ended" update while the page stays open. One timer for the next change, no
+ * polling and no API requests.
+ */
+function useNowUntil(times: number[]): number {
+  const [now, setNow] = useState(Date.now)
+  const next = nextChange(times, now)
+  useEffect(() => {
+    if (next === null) return
+    // Never earlier than `next`, so a timer that fires a hair early still moves on.
+    const id = setTimeout(() => setNow(Math.max(Date.now(), next)), Math.min(next - Date.now(), 2 ** 31 - 1))
+    return () => clearTimeout(id)
+  }, [next])
+  useEffect(() => {
+    // A sleeping laptop delays timers; catch up as soon as the page is visible again.
+    const wake = () => document.visibilityState === 'visible' && setNow(Date.now())
+    document.addEventListener('visibilitychange', wake)
+    return () => document.removeEventListener('visibilitychange', wake)
+  }, [])
+  return now
+}
+
 function Schedule({ items, today }: { items: Occurrence[]; today: string }) {
   const events = useEventDialog()
-  const [now] = useState(() => new Date().toISOString()) // refreshed whenever Today refetches
+  const now = useNowUntil(items.map((o) => Date.parse(o.end)))
   const titles = new Map(items.map((o) => [o.event_id, o.title]))
   return (
     <ul className="list">
@@ -238,14 +272,14 @@ function Schedule({ items, today }: { items: Occurrence[]; today: string }) {
         <li key={`${o.event_id}-${o.start}`}>
           <button
             type="button"
-            className={o.end < now ? 'schedule-row is-past' : 'schedule-row'}
+            className={Date.parse(o.end) <= now ? 'schedule-row is-past' : 'schedule-row'}
             onClick={() => events.open({ eventId: o.event_id })}
           >
             <span className="agenda-time num">
               {o.start_date < today ? 'Until ' : `${formatTime(o.start_time)}–`}
               {formatTime(o.end_time)}
               {o.end_date > today && <span className="time-note">ends next day</span>}
-              {o.end < now && <span className="time-note">Ended</span>}
+              {Date.parse(o.end) <= now && <span className="time-note">Ended</span>}
             </span>
             <span className="agenda-main">
               <span className="a-title">{o.title}</span>

@@ -83,3 +83,9 @@ export function formatInstant(iso: string, timeZone: string): string {
   const date = `${get('year')}-${get('month')}-${get('day')}`
   return `${relativeDay(date, todayIn(timeZone))}, ${formatTime(`${get('hour')}:${get('minute')}`)}`
 }
+
+/** The earliest of `times` (ms) still in the future of `now`, or null: when a view must next re-render. */
+export function nextChange(times: number[], now: number): number | null {
+  const future = times.filter((t) => t > now)
+  return future.length ? Math.min(...future) : null
+}
