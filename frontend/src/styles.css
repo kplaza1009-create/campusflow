@@ -1412,9 +1412,26 @@ dialog.sheet::backdrop {
 .wg-event.is-short .ev-time {
   display: none;
 }
+.ev-until {
+  flex: none;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+}
 /* Red marks the fact that needs a decision: two things at once. */
 .wg-event.is-conflict {
   border: 1.5px solid var(--negative);
+}
+/* A flat, dashed edge where an overnight event carries on into the next day. */
+.wg-event.continues-before {
+  border-top-style: dashed;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+.wg-event.continues-after {
+  border-bottom-style: dashed;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
 }
 
 .wg-deadline {

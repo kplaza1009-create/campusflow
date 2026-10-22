@@ -301,7 +301,9 @@ function DayColumn({
           <button
             type="button"
             key={`${o.event_id}-${o.start}`}
-            className={`wg-event${clash ? ' is-conflict' : ''}${bottom - top < 45 ? ' is-short' : ''}`}
+            className={`wg-event${clash ? ' is-conflict' : ''}${bottom - top < 45 ? ' is-short' : ''}${
+              s.continuesBefore ? ' continues-before' : ''
+            }${s.continuesAfter ? ' continues-after' : ''}`}
             style={{
               top: y(top),
               height: Math.max(y(bottom) - y(top), 18),
@@ -315,6 +317,8 @@ function DayColumn({
           >
             <span className="ev-title">
               {clash && <TriangleAlert size={12} aria-hidden="true" />}
+              {/* The tail of last night's event is pinned to the top; lead with when it really ends. */}
+              {s.continuesBefore && <span className="ev-until num">until {formatTime(o.end_time)}</span>}
               {o.title}
             </span>
             <span className="ev-time num">
@@ -342,12 +346,14 @@ function DayColumn({
 
 function DeadlineChip({ a }: { a: Assignment }) {
   const dialog = useAssignmentDialog()
+  const label = `Due ${a.due_time ? formatTime(a.due_time) : 'end of day'}: ${a.title}${a.completed ? ', done' : ''}`
   return (
     <button
       type="button"
       className={a.completed ? 'deadline-chip is-done' : a.overdue ? 'deadline-chip is-late' : 'deadline-chip'}
       onClick={() => dialog.open(a)}
-      aria-label={`Due ${a.due_time ? formatTime(a.due_time) : 'end of day'}: ${a.title}${a.completed ? ', done' : ''}`}
+      aria-label={label}
+      title={label} // narrow columns cut titles short; hovering shows the whole thing
     >
       <span className="course-dot" style={{ background: a.course.color }} aria-hidden="true" />
       <span className="chip-text">
