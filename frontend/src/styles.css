@@ -1625,29 +1625,59 @@ dialog.sheet::backdrop {
 /* Today: schedule */
 .schedule-row {
   display: grid;
-  grid-template-columns: 150px minmax(0, 1fr) auto;
-  align-items: center;
+  /* The warning column grows to fit, up to 40%, then wraps, so it can't squeeze the title. */
+  grid-template-columns: 150px minmax(0, 1fr) fit-content(40%);
+  align-items: start; /* rows can wrap to several lines; keep the time beside the first */
   gap: 12px;
   min-height: 52px;
   width: 100%;
-  padding: 8px 16px;
+  padding: 10px 16px;
   border: 0;
   background: none;
   text-align: left;
   cursor: pointer;
 }
+/* Titles and places (up to 200 characters) identify the event: wrap them, never cut them off.
+   Times stay on one line and are never truncated. */
+.schedule-row .a-title,
+.schedule-row .course-name,
+.schedule-row .agenda-conflict {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.schedule-row .a-meta,
+.schedule-row .agenda-conflict {
+  align-items: flex-start;
+}
+.schedule-row .a-meta .course-dot {
+  margin-top: 0.4em; /* centered on the first line when the place wraps */
+}
+.schedule-row .agenda-conflict svg {
+  flex: none; /* a long warning must not squeeze the icon to a dot */
+  margin-top: 0.15em;
+}
 /* Finished classes recede with muted text and an "Ended" label, not opacity,
-   which would push their details below 4.5:1 contrast. */
+   which would push their details below 4.5:1 contrast. The short fade keeps the
+   change from looking like a glitch when it happens while the page is open. */
+.schedule-row .agenda-time,
+.schedule-row .a-title {
+  transition: color 200ms ease;
+}
 .schedule-row.is-past .agenda-time,
 .schedule-row.is-past .a-title {
   color: var(--muted);
 }
-@media (max-width: 520px) {
+/* Narrow screens: stack like the Week agenda, time above the details. */
+@media (max-width: 760px) {
   .schedule-row {
-    grid-template-columns: 96px minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
   }
-  .schedule-row .agenda-conflict {
-    grid-column: 2;
+  .schedule-row .agenda-time {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    column-gap: 8px; /* "ends next day" and "Ended" sit beside the time instead of under it */
   }
 }
 
