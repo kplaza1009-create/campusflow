@@ -1,6 +1,8 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Page } from '@playwright/test'
 
+import { runWorkerOnce } from './env'
+
 // Automated WCAG 2.2 AA check (axe-core) of every page and dialog, in light and
 // dark mode, at desktop and phone widths. It catches what code can catch:
 // missing labels, contrast, ARIA misuse, duplicate IDs, heading order. Screen
@@ -65,6 +67,7 @@ const PAGES = [
   ['Assignments', '/assignments'],
   ['Done assignments', '/assignments?status=completed'],
   ['Courses', '/courses'],
+  ['Notifications', '/notifications'],
   ['Settings', '/settings'],
 ] as const
 
@@ -86,6 +89,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
 
       test('every signed-in page and dialog', async ({ page }) => {
         await seed(page)
+        runWorkerOnce() // delivers the due reminder, so Notifications has an unread item to scan
         for (const [name, path] of PAGES) {
           await page.goto(path)
           await page.waitForLoadState('networkidle')

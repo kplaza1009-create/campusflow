@@ -1,11 +1,12 @@
 import { defineConfig, devices } from '@playwright/test'
 
+import { E2E_DATABASE_URL } from './e2e/env'
+
 // The browser tests start their own API (on its own database) and dev server,
 // so they never touch your development data.
 const API_PORT = 8011
 const WEB_PORT = 5181
-const DB_URL =
-  process.env.CAMPUSFLOW_E2E_DATABASE_URL ?? 'postgresql+psycopg://campusflow:campusflow@localhost:5432/campusflow_e2e'
+const DB_URL = E2E_DATABASE_URL
 
 export default defineConfig({
   testDir: './e2e',
