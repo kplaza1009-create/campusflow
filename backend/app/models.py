@@ -262,6 +262,10 @@ class Reminder(Base):
     channel: Mapped[str] = mapped_column(String(8))
     # What it was scheduled for, rechecked against the assignment before delivery.
     deadline_at: Mapped[datetime] = mapped_column(TZ)
+    # The due date of a date-only deadline (null for exact-time deadlines). With channel
+    # and lead_minutes it identifies the reminder independently of the time zone, so a
+    # zone change moves a waiting reminder but never re-sends a delivered one.
+    due_on: Mapped[date | None] = mapped_column(Date)
     lead_minutes: Mapped[int] = mapped_column(Integer)
     send_at: Mapped[datetime] = mapped_column(TZ)
     status: Mapped[str] = mapped_column(String(12), server_default=text("'pending'"))

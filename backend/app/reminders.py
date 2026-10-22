@@ -13,13 +13,29 @@ Rules (shared with the overdue logic in app/timeutil.py):
   hasn't, it fires as soon as possible.
 - In-app reminders are always on; email ones only if the user opted in.
 
+Identity and idempotency. A reminder is identified by its channel, its lead time,
+and the due date (or exact due instant), not by when it fires. Each one is
+delivered at most once:
+- Editing anything else (title, description, course), saving unchanged settings,
+  or resyncing leaves it alone, whether it is waiting, being sent, or already sent.
+- Changing the due date, the due time, or the lead time is a different reminder,
+  so it gets scheduled (and a waiting old one is cancelled).
+- A time zone change moves a *waiting* date-only reminder to the new local time,
+  but never re-sends one that already went out.
+- Completing an assignment cancels its waiting reminders. Reopening it brings back
+  any that were cancelled before they were sent; ones already sent stay sent.
+- Turning email on adds email only to reminders that haven't fired yet; it doesn't
+  send late copies of ones already shown in-app. Turning it off cancels waiting
+  emails, and an email already being sent is cancelled at its delivery recheck.
+
 `sync_assignment` runs in the same transaction as every change that could affect a
-reminder, so the queue never disagrees with the data it was built from. It locks
-the assignment row first, so two concurrent edits can't both insert a reminder.
+reminder, so the queue never disagrees with the data it was built from. It locks the
+assignment row and that assignment's reminder rows: concurrent edits wait their turn,
+and the worker, which claims with SKIP LOCKED, passes over the rows until it commits.
 """
 
 from dataclasses import dataclass
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -29,13 +45,26 @@ from app.timeutil import end_of_date, localize
 
 DAY_REMINDER_TIME = time(9, 0)
 
+Identity = tuple[str, int, date | datetime]
+
 
 @dataclass(frozen=True)
 class Planned:
     channel: str
     deadline_at: datetime
+    due_on: date | None
     lead_minutes: int
     send_at: datetime
+
+
+def identity(r: Planned | Reminder) -> Identity:
+    """Which reminder this is: channel, lead time, and due date (or exact due instant)."""
+    return (r.channel, r.lead_minutes, r.due_on if r.due_on is not None else r.deadline_at)
+
+
+def same_moment(r: Planned | Reminder) -> tuple[int, date | datetime]:
+    """The reminder regardless of channel."""
+    return identity(r)[1:]
 
 
 def deadline_of(a: Assignment, tz: str) -> datetime:
@@ -65,14 +94,17 @@ def plan(a: Assignment, course: Course, user: User, now: datetime) -> list[Plann
         return []
     send_at = max(reminder_time(a, a.reminder_minutes, tz), now)
     channels = ["in_app", "email"] if user.email_reminders else ["in_app"]
-    return [Planned(c, deadline, a.reminder_minutes, send_at) for c in channels]
+    return [Planned(c, deadline, a.due_date, a.reminder_minutes, send_at) for c in channels]
 
 
 def sync_assignment(db: Session, assignment_id: int, user: User, now: datetime) -> None:
-    """Make pending reminders match the plan: keep matches, cancel the rest, add what's missing.
+    """Make the assignment's reminders match the plan without ever repeating one.
 
-    Reminders already being processed are left alone; the worker rechecks them
-    against the assignment before delivering, and skips them if they're stale.
+    For each planned reminder: if it already exists in any state other than
+    cancelled (waiting with the same timing, being sent, or finished), keep it. A
+    waiting one whose timing moved (time zone change) is replaced. Waiting ones that
+    are no longer planned are cancelled. Ones being sent are left to the worker,
+    which rechecks before delivering.
     """
     row = db.execute(
         select(Assignment, Course)
@@ -80,37 +112,43 @@ def sync_assignment(db: Session, assignment_id: int, user: User, now: datetime) 
         .where(Assignment.id == assignment_id, Assignment.user_id == user.id)
         .with_for_update(of=Assignment)
     ).first()
-    pending = list(
+    existing = list(
         db.scalars(
-            select(Reminder).where(
+            select(Reminder)
+            .where(
                 Reminder.assignment_id == assignment_id,
                 Reminder.user_id == user.id,
-                Reminder.status == "pending",
+                Reminder.status != "cancelled",
             )
+            .order_by(Reminder.id)
+            .with_for_update()
         )
     )
-    wanted = plan(row[0], row[1], user, now) if row else []
-    for r in pending:
-        match = next(
-            (
-                p
-                for p in wanted
-                if (p.channel, p.deadline_at, p.lead_minutes) == (r.channel, r.deadline_at, r.lead_minutes)
-            ),
-            None,
-        )
-        if match is not None:
-            wanted.remove(match)
-        else:
+    # Reminders that have fired, or are firing, on some channel.
+    fired = {same_moment(r) for r in existing if r.status != "pending"}
+    keep: set[int] = set()
+    add: list[Planned] = []
+    for p in plan(row[0], row[1], user, now) if row else []:
+        same = [r for r in existing if identity(r) == identity(p)]
+        if any(r.status != "pending" for r in same):
+            continue  # already sent or being sent: never again
+        waiting = next((r for r in same if r.deadline_at == p.deadline_at), None)
+        if waiting is not None:
+            keep.add(waiting.id)
+        elif same_moment(p) not in fired:  # e.g. email turned on after the in-app one went out
+            add.append(p)
+    for r in existing:
+        if r.status == "pending" and r.id not in keep:
             r.status, r.detail, r.finished_at = "cancelled", "Rescheduled or no longer needed.", now
     db.flush()  # free the one-pending-per-channel slot before inserting replacements
-    for p in wanted:
+    for p in add:
         db.add(
             Reminder(
                 user_id=user.id,
                 assignment_id=assignment_id,
                 channel=p.channel,
                 deadline_at=p.deadline_at,
+                due_on=p.due_on,
                 lead_minutes=p.lead_minutes,
                 send_at=p.send_at,
                 next_attempt_at=p.send_at,

@@ -49,7 +49,7 @@ from app.email import (
     mask_email,
 )
 from app.models import Assignment, Course, Notification, Reminder, User
-from app.reminders import plan, sync_assignments
+from app.reminders import deadline_of, identity, plan, sync_assignments
 from app.timeutil import zone
 
 log = logging.getLogger("campusflow.worker")
@@ -127,22 +127,27 @@ def describe_due(a: Assignment, tz: str) -> str:
 
 def _recheck(
     job: Reminder, a: Assignment | None, course: Course | None, user: User, now: datetime
-) -> str | None:
-    """Why this job should no longer be delivered, or None if it should."""
+) -> tuple[str, str] | None:
+    """(status, reason) if this job should not be delivered, or None if it should.
+
+    "cancelled" means the reminder is no longer wanted, so reopening or restoring can
+    bring it back. "skipped" is a final policy decision: the deadline passed first.
+    """
     if a is None or course is None:
-        return "The assignment was deleted."
+        return "cancelled", "The assignment was deleted."
     if a.completed_at is not None:
-        return "The assignment was completed."
+        return "cancelled", "The assignment was completed."
     if course.archived_at is not None:
-        return "The course was archived."
-    if job.deadline_at <= now:
-        return "The deadline passed before the reminder could be delivered."
-    current = plan(a, course, user, now)
-    if not any(
-        (p.channel, p.deadline_at, p.lead_minutes) == (job.channel, job.deadline_at, job.lead_minutes)
-        for p in current
-    ):
-        return "The assignment was rescheduled; a newer reminder replaces this one."
+        return "cancelled", "The course was archived."
+    if deadline_of(a, user.time_zone) <= now:
+        return "skipped", "The deadline passed before the reminder could be delivered."
+    if identity(job) not in {identity(p) for p in plan(a, course, user, now)}:
+        reason = (
+            "Email reminders were turned off."
+            if job.channel == "email" and not user.email_reminders
+            else ("The assignment was rescheduled; a newer reminder replaces this one.")
+        )
+        return "cancelled", reason
     return None
 
 
@@ -169,10 +174,11 @@ def process(
             db, job, worker_id, now, status="failed", detail=f"Gave up after {job.attempts - 1} attempts."
         )
         return "failed"
-    if (reason := _recheck(job, a, course, user, now)) is not None:
-        _finish(db, job, worker_id, now, status="skipped", detail=reason)
-        log.info("reminder %s skipped: %s", job.id, reason)
-        return "skipped"
+    if (stop := _recheck(job, a, course, user, now)) is not None:
+        outcome, reason = stop
+        _finish(db, job, worker_id, now, status=outcome, detail=reason)
+        log.info("reminder %s %s: %s", job.id, outcome, reason)
+        return outcome
     assert a is not None and course is not None
     due = describe_due(a, user.time_zone)
     course_label = course.code or course.name

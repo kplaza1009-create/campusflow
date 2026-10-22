@@ -251,20 +251,20 @@ def test_email_reminder_is_accepted_with_a_stable_idempotency_key(api: Api, cloc
     assert (email_job.status, email_job.provider_message_id) == ("accepted", "msg-1")
 
 
-def test_recheck_skips_a_reminder_completed_after_it_was_claimed(api: Api, clock: Clock) -> None:
+def test_recheck_cancels_a_reminder_completed_after_it_was_claimed(api: Api, clock: Clock) -> None:
     a = homework(api, due_date="2026-10-15")
     clock.advance(minutes=1)  # its reminder time has passed; the deadline hasn't
     with SessionLocal() as db:
         [job_id] = claim(db, "w1", clock.now, timedelta(minutes=5))
     api.post(f"/api/assignments/{a['id']}/completion", {"completed": True})
     with SessionLocal() as db:
-        assert process(db, job_id, FakeSender(), cfg(), "w1", clock.now) == "skipped"
+        assert process(db, job_id, FakeSender(), cfg(), "w1", clock.now) == "cancelled"
     [r] = jobs()
     assert r.detail == "The assignment was completed."
     assert notifications() == []
 
 
-def test_recheck_skips_a_reminder_rescheduled_while_claimed(api: Api, clock: Clock) -> None:
+def test_recheck_cancels_a_reminder_rescheduled_while_claimed(api: Api, clock: Clock) -> None:
     a = homework(api, due_date="2026-10-15")
     clock.advance(minutes=1)  # its reminder time has passed; the deadline hasn't
     with SessionLocal() as db:
@@ -277,8 +277,8 @@ def test_recheck_skips_a_reminder_rescheduled_while_claimed(api: Api, clock: Clo
     }
     api.put(f"/api/assignments/{a['id']}", body)
     with SessionLocal() as db:
-        assert process(db, job_id, FakeSender(), cfg(), "w1", clock.now) == "skipped"
-    assert {r.status for r in jobs()} == {"skipped", "pending"}  # the new one waits for its own time
+        assert process(db, job_id, FakeSender(), cfg(), "w1", clock.now) == "cancelled"
+    assert {r.status for r in jobs()} == {"cancelled", "pending"}  # the new one waits for its own time
 
 
 def test_outage_policy_late_but_before_deadline_is_sent_after_deadline_is_skipped(
@@ -587,3 +587,204 @@ def test_worker_command_line_once_and_resync(
         get_settings.cache_clear()
     assert {(r.channel, r.status) for r in jobs()} == {("in_app", "delivered"), ("email", "captured")}
     assert len((tmp_path / "captured-emails.jsonl").read_text().splitlines()) == 1
+
+
+# --- One delivery per logical reminder, across its whole lifecycle -------------------------
+#
+# A "logical reminder" is one channel, one lead time, and one deadline (for a date-only
+# deadline, the due *date*, so a time zone change doesn't make it a new reminder).
+# Once it has been delivered, captured, accepted, failed, or skipped, it is never
+# scheduled again. Only a cancelled one (never attempted) can be scheduled again.
+
+
+def deliver_now(api: Api, clock: Clock, sender: FakeSender, email: bool = True) -> dict[str, Any]:
+    """An assignment whose 1-day reminder time has passed (due tomorrow), delivered once."""
+    if email:
+        api.patch("/api/account", {"email_reminders": True})
+    a = homework(api, due_date="2026-10-15")
+    clock.advance(minutes=1)
+    expected = {"delivered": 1, "accepted": 1} if email else {"delivered": 1}
+    assert run(clock, sender) == expected
+    return a
+
+
+def edit(api: Api, a: dict[str, Any], **changes: Any) -> dict[str, Any]:
+    body = {
+        "title": a["title"],
+        "course_id": a["course"]["id"],
+        "due_date": a["due_date"],
+        "description": a["description"],
+        "reminder_minutes": a["reminder_minutes"],
+    } | changes
+    r = api.put(f"/api/assignments/{a['id']}", body)
+    assert r.status_code == 200, r.text
+    return dict(r.json())
+
+
+def deliveries(sender: FakeSender) -> tuple[int, int]:
+    return len(notifications()), len(sender.sent)
+
+
+def test_editing_title_or_description_after_delivery_sends_nothing_new(api: Api, clock: Clock) -> None:
+    sender = FakeSender()
+    a = deliver_now(api, clock, sender)
+    a = edit(api, a, title="Homework 1 (revised)")
+    edit(api, a, description="Bring a calculator")
+    assert jobs(status="pending") == []
+    clock.advance(minutes=5)
+    assert run(clock, sender) == {}
+    assert deliveries(sender) == (1, 1)
+    assert len(jobs()) == 2  # the original in-app and email reminders, nothing added
+
+
+def test_saving_unchanged_settings_after_delivery_sends_nothing_new(api: Api, clock: Clock) -> None:
+    sender = FakeSender()
+    deliver_now(api, clock, sender)
+    for _ in range(2):
+        r = api.patch("/api/account", {"time_zone": "America/New_York", "email_reminders": True})
+        assert r.status_code == 200
+    clock.advance(minutes=5)
+    assert run(clock, sender) == {}
+    assert deliveries(sender) == (1, 1)
+
+
+def test_repeated_resync_before_and_after_delivery_never_duplicates(api: Api, clock: Clock) -> None:
+    api.patch("/api/account", {"email_reminders": True})
+    homework(api, due_date="2026-10-20")
+    for _ in range(3):
+        resync_all(clock.now)
+    assert len(jobs()) == 2  # one in-app, one email, both still pending
+    clock.set(ny(2026, 10, 19, 9))
+    sender = FakeSender()
+    assert run(clock, sender) == {"delivered": 1, "accepted": 1}
+    for _ in range(3):
+        resync_all(clock.now)
+        assert run(clock, sender) == {}
+    assert len(jobs()) == 2
+    assert deliveries(sender) == (1, 1)
+
+
+def test_syncing_while_a_matching_job_is_processing_adds_no_job_and_no_delivery(
+    api: Api, clock: Clock
+) -> None:
+    api.patch("/api/account", {"email_reminders": True})
+    a = homework(api, due_date="2026-10-15")
+    clock.advance(minutes=1)
+    with SessionLocal() as db:
+        claimed = claim(db, "w1", clock.now, timedelta(minutes=5))
+    assert len(claimed) == 2
+    # Every kind of resync arrives while the worker holds both jobs.
+    edit(api, a, title="Renamed while sending")
+    api.patch("/api/account", {"time_zone": "America/New_York", "email_reminders": True})
+    resync_all(clock.now)
+    assert len(jobs()) == 2  # nothing queued behind the in-flight jobs
+    sender = FakeSender()
+    with SessionLocal() as db:
+        outcomes = {process(db, job_id, sender, cfg(), "w1", clock.now) for job_id in claimed}
+    assert outcomes == {"delivered", "accepted"}
+    clock.advance(minutes=10)
+    assert run(clock, sender) == {}
+    assert deliveries(sender) == (1, 1)
+
+
+def test_changing_the_deadline_after_delivery_schedules_one_replacement(api: Api, clock: Clock) -> None:
+    sender = FakeSender()
+    a = deliver_now(api, clock, sender, email=False)
+    edit(api, a, due_date="2026-10-20")
+    [replacement] = jobs(status="pending")
+    assert (replacement.channel, replacement.send_at) == ("in_app", ny(2026, 10, 19, 9))
+    resync_all(clock.now)
+    assert len(jobs(status="pending")) == 1
+    clock.set(ny(2026, 10, 19, 9))
+    assert run(clock, sender) == {"delivered": 1}  # the new deadline's reminder, once
+    assert [n.body.split(" · ")[0] for n in notifications()] == [
+        "Due Thu, Oct 15 (end of day)",
+        "Due Tue, Oct 20 (end of day)",
+    ]
+
+
+def test_changing_the_reminder_lead_time_schedules_the_replacement(api: Api, clock: Clock) -> None:
+    a = homework(api, due_date="2026-10-20", reminder_minutes=1440)
+    edit(api, a, reminder_minutes=60)
+    old, new = jobs()
+    assert (old.status, new.status) == ("cancelled", "pending")
+    assert new.send_at == ny(2026, 10, 20, 23)
+    edit(api, a, reminder_minutes=None)
+    assert jobs(status="pending") == []
+
+
+def test_completing_and_reopening_never_resends_a_delivered_reminder(api: Api, clock: Clock) -> None:
+    sender = FakeSender()
+    a = deliver_now(api, clock, sender)
+    api.post(f"/api/assignments/{a['id']}/completion", {"completed": True})
+    api.post(f"/api/assignments/{a['id']}/completion", {"completed": False})
+    assert jobs(status="pending") == []
+    clock.advance(minutes=5)
+    assert run(clock, sender) == {}
+    assert deliveries(sender) == (1, 1)
+
+
+def test_reopening_before_the_reminder_fired_restores_it_once(api: Api, clock: Clock) -> None:
+    a = homework(api, due_date="2026-10-20")
+    api.post(f"/api/assignments/{a['id']}/completion", {"completed": True})
+    api.post(f"/api/assignments/{a['id']}/completion", {"completed": False})
+    assert len(jobs(status="pending")) == 1
+    clock.set(ny(2026, 10, 19, 9))
+    assert run(clock) == {"delivered": 1}
+    api.post(f"/api/assignments/{a['id']}/completion", {"completed": True})
+    api.post(f"/api/assignments/{a['id']}/completion", {"completed": False})
+    assert run(clock) == {}
+    assert len(notifications()) == 1
+
+
+def test_completed_after_claim_then_reopened_is_delivered_once(api: Api, clock: Clock) -> None:
+    a = homework(api, due_date="2026-10-15")
+    clock.advance(minutes=1)
+    with SessionLocal() as db:
+        [job_id] = claim(db, "w1", clock.now, timedelta(minutes=5))
+    api.post(f"/api/assignments/{a['id']}/completion", {"completed": True})
+    with SessionLocal() as db:
+        assert process(db, job_id, FakeSender(), cfg(), "w1", clock.now) == "cancelled"
+    api.post(f"/api/assignments/{a['id']}/completion", {"completed": False})
+    assert run(clock) == {"delivered": 1}  # it was never delivered, so reopening brings it back
+    assert run(clock) == {}
+    assert len(notifications()) == 1
+
+
+def test_time_zone_change_after_delivery_does_not_resend_a_date_only_reminder(api: Api, clock: Clock) -> None:
+    sender = FakeSender()
+    deliver_now(api, clock, sender)
+    api.patch("/api/account", {"time_zone": "America/Los_Angeles"})
+    assert jobs(status="pending") == []
+    clock.advance(hours=4)
+    assert run(clock, sender) == {}
+    assert deliveries(sender) == (1, 1)
+
+
+def test_time_zone_change_before_delivery_moves_the_pending_reminder(api: Api, clock: Clock) -> None:
+    homework(api, due_date="2026-10-20")
+    api.patch("/api/account", {"time_zone": "America/Los_Angeles"})
+    api.patch("/api/account", {"time_zone": "America/Los_Angeles"})
+    [pending] = jobs(status="pending")
+    assert pending.send_at == datetime(2026, 10, 19, 16, tzinfo=UTC)  # 9:00 AM Pacific
+
+
+def test_email_opt_in_after_the_reminder_fired_sends_no_late_email(api: Api, clock: Clock) -> None:
+    sender = FakeSender()
+    deliver_now(api, clock, sender, email=False)
+    api.patch("/api/account", {"email_reminders": True})
+    assert jobs(channel="email") == []
+    assert run(clock, sender) == {}
+    assert sender.sent == []
+
+
+def test_email_opt_out_and_back_in_before_it_fires_sends_one_email(api: Api, clock: Clock) -> None:
+    homework(api, due_date="2026-10-20")
+    for on in (True, False, True, True):
+        api.patch("/api/account", {"email_reminders": on})
+    assert len(jobs(channel="email", status="pending")) == 1
+    clock.set(ny(2026, 10, 19, 9))
+    sender = FakeSender()
+    assert run(clock, sender) == {"delivered": 1, "accepted": 1}
+    assert run(clock, sender) == {}
+    assert len(sender.sent) == 1
