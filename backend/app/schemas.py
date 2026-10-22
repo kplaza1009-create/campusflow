@@ -13,6 +13,7 @@ from pydantic import (
     model_validator,
 )
 
+from app.config import get_settings
 from app.timeutil import is_valid_zone
 
 Str = Annotated[str, StringConstraints(strip_whitespace=True)]
@@ -61,6 +62,9 @@ class UserOut(BaseModel):
     id: int
     email: str
     time_zone: str
+    email_reminders: bool
+    # How this server handles reminder email: "capture" saves it locally, "resend" sends it.
+    email_delivery: Literal["capture", "resend"] = Field(default_factory=lambda: get_settings().email_mode)
 
 
 class SessionOut(BaseModel):
@@ -69,9 +73,15 @@ class SessionOut(BaseModel):
 
 
 class SettingsUpdate(BaseModel):
-    time_zone: str
+    """Only the fields sent are changed."""
 
-    _zone = field_validator("time_zone")(_check_zone)
+    time_zone: str | None = None
+    email_reminders: bool | None = None
+
+    @field_validator("time_zone")
+    @classmethod
+    def _zone(cls, v: str | None) -> str | None:
+        return None if v is None else _check_zone(v)
 
 
 class PasswordChange(BaseModel):
@@ -337,3 +347,36 @@ class TodayOut(BaseModel):
     due_today: list[AssignmentOut]
     upcoming: list[AssignmentOut]
     events: list[OccurrenceOut] = []
+
+
+# --- Reminders and notifications ---------------------------------------------------
+
+
+class ReminderOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    channel: Literal["in_app", "email"]
+    status: str
+    send_at: datetime
+    attempts: int
+    next_attempt_at: datetime
+    detail: str | None
+    provider_status: str | None
+    finished_at: datetime | None
+
+
+class NotificationOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    title: str
+    body: str
+    assignment_id: int | None
+    created_at: datetime
+    read_at: datetime | None
+
+
+class NotificationList(BaseModel):
+    unread: int
+    items: list[NotificationOut]

@@ -3,8 +3,9 @@
 from fastapi import APIRouter, HTTPException, Response, status
 from sqlalchemy import delete
 
-from app.deps import DB, CurrentAuth
+from app.deps import DB, CurrentAuth, Now
 from app.models import User, UserSession
+from app.reminders import sync_assignments
 from app.routers.auth import _clear_cookie
 from app.schemas import AccountDeletion, PasswordChange, SettingsUpdate, UserOut
 from app.security import hash_password, verify_password
@@ -13,10 +14,15 @@ router = APIRouter(prefix="/api/account", tags=["account"])
 
 
 @router.patch("", response_model=UserOut)
-def update_settings(body: SettingsUpdate, auth: CurrentAuth, db: DB) -> User:
+def update_settings(body: SettingsUpdate, auth: CurrentAuth, db: DB, now: Now) -> User:
     # Exact deadlines are stored as UTC instants and date-only deadlines as dates,
     # so changing the zone only changes how they're displayed and when dates end.
-    auth.user.time_zone = body.time_zone
+    if body.time_zone is not None:
+        auth.user.time_zone = body.time_zone
+    if body.email_reminders is not None:
+        auth.user.email_reminders = body.email_reminders
+    # Date-only reminders follow the zone, and email ones follow the opt-in: resync both.
+    sync_assignments(db, auth.user, now)
     db.commit()
     return auth.user
 

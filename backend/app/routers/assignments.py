@@ -12,7 +12,8 @@ from sqlalchemy.orm import Session
 from app.calendar import shaped_window
 from app.deps import DB, CurrentAuth, Now
 from app.idempotency import IdempotencyKey
-from app.models import Assignment, Course
+from app.models import Assignment, Course, Reminder
+from app.reminders import sync_assignment
 from app.routers.courses import get_owned_course
 from app.schemas import (
     AssignmentCompletion,
@@ -22,6 +23,7 @@ from app.schemas import (
     AssignmentUpdate,
     CourseBrief,
     DuplicateWarning,
+    ReminderOut,
     TodayOut,
 )
 from app.timeutil import (
@@ -290,6 +292,8 @@ def create_assignment(
         .on_conflict_do_nothing(constraint="uq_assignments_idempotency")
         .returning(Assignment.id)
     )
+    if new_id is not None:
+        sync_assignment(db, new_id, auth.user, now)  # same transaction as the insert
     db.commit()
     if new_id is None:
         response.status_code = status.HTTP_200_OK
@@ -326,6 +330,8 @@ def update_assignment(
 
     a.course_id, a.title, a.description = body.course_id, body.title, body.description
     a.due_date, a.due_at, a.reminder_minutes = due_date, due_at, body.reminder_minutes
+    db.flush()
+    sync_assignment(db, a.id, auth.user, now)
     db.commit()
     db.refresh(a)
     return to_out(a, tz, now, ambiguous)
@@ -340,11 +346,28 @@ def set_completion(
         a.completed_at = now
     elif not body.completed:
         a.completed_at = None
+    db.flush()
+    sync_assignment(db, a.id, auth.user, now)  # completing cancels reminders; reopening restores them
     db.commit()
     return to_out(a, auth.user.time_zone, now)
 
 
 @router.delete("/assignments/{assignment_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_assignment(assignment_id: int, auth: CurrentAuth, db: DB) -> None:
+    # Its reminders go with it (ON DELETE CASCADE); notifications keep their text.
     db.delete(_owned(db, auth.user.id, assignment_id))
     db.commit()
+
+
+@router.get("/assignments/{assignment_id}/reminders", response_model=list[ReminderOut])
+def assignment_reminders(assignment_id: int, auth: CurrentAuth, db: DB) -> list[Reminder]:
+    """Scheduling and delivery history, newest first, for the edit dialog."""
+    _owned(db, auth.user.id, assignment_id)
+    return list(
+        db.scalars(
+            select(Reminder)
+            .where(Reminder.user_id == auth.user.id, Reminder.assignment_id == assignment_id)
+            .order_by(Reminder.created_at.desc(), Reminder.id.desc())
+            .limit(10)
+        )
+    )

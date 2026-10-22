@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.deps import DB, CurrentAuth, Now
 from app.idempotency import IdempotencyKey
 from app.models import Assignment, Course, Event
+from app.reminders import sync_assignments
 from app.schemas import CourseCreate, CourseOut, CourseUpdate, DeletionImpact
 
 router = APIRouter(prefix="/api/courses", tags=["courses"])
@@ -90,6 +91,9 @@ def update_course(course_id: int, body: CourseUpdate, auth: CurrentAuth, db: DB,
         course.archived_at = now
     elif not body.archived:
         course.archived_at = None
+    db.flush()
+    # An archived course's reminders are cancelled; restoring it schedules them again.
+    sync_assignments(db, auth.user, now, course_id=course.id)
     db.commit()
     return _out(course, _open_counts(db, auth.user.id).get(course.id, 0))
 
