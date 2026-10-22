@@ -46,6 +46,9 @@ exclude = ["alembic/versions"]
 module = ["tests.*", "conftest"]
 disallow_untyped_decorators = false
 
+[tool.ruff.lint.per-file-ignores]
+"alembic/versions/*" = ["E501"]  # generated migrations
+
 [tool.ruff.lint.isort]
 known-first-party = ["app"]
 known-third-party = ["alembic"]
