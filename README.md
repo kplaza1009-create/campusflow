@@ -133,7 +133,8 @@ erDiagram
     smallint attempts
     timestamptz next_attempt_at "backoff"
     timestamptz locked_until "worker lease"
-    varchar detail "why skipped or failed"
+    date due_on "date-only due date: part of the reminder's identity"
+    varchar detail "why cancelled, skipped, or failed"
     varchar provider_message_id
     varchar provider_status "Resend last_event"
   }
@@ -241,7 +242,7 @@ npm run test:e2e
 
 GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs all three jobs on every push and pull request, with a PostgreSQL 16 service container.
 
-What the 123 backend tests cover (97% line coverage):
+What the 136 backend tests cover (96% line coverage):
 
 - **Auth:** HTTP-only cookie, email normalization, generic login errors, server-side logout (a replayed cookie fails), idle and absolute expiry, CSRF header required for writes, cross-origin writes rejected, login throttling that survives across clients, password change signing out other devices, account deletion.
 - **Isolation:** another user's records return 404 by ID for read, edit, complete, delete, archive, and deletion-impact. An assignment can't be attached to another user's course, and the database itself rejects such a row. Idempotency keys are scoped per user.
@@ -249,12 +250,12 @@ What the 123 backend tests cover (97% line coverage):
 - **Courses:** validation, idempotent create, archive keeps data, and delete requires the confirmed count and cascades in one transaction.
 - **Time:** spring-forward gaps, fall-back overlaps, overdue exactly after 11:59 PM local, time zone changes, and "today" computed in the user's zone rather than UTC.
 - **Scheduling rules (pure functions, no database):** adjacent events don't conflict, a one-minute overlap does, overnight events clash with the next morning, weekly expansion stays inside both the window and the series dates, classes keep their local time through daylight saving, a class start in the spring-forward gap moves forward, a repeated fall-back time uses the first one, and a class defined in another zone keeps that zone's wall time.
-- **Reminders (40 tests):** when reminders fire (9:00 AM for day-based leads on date-only deadlines, counting back from midnight for hour-based ones, immediately if the time has passed but the deadline hasn't); rescheduling on edit, completion, reopening, archiving, time zone changes, and email opt-in; four concurrent resyncs leaving exactly one pending reminder; three concurrent workers claiming 30 jobs with no job claimed twice; a crashed worker's job reclaimed after its lease, with the late worker unable to deliver it again; a job that keeps crashing its worker failing after 5 attempts; backoff of 1 then 4 minutes with a stable idempotency key across retries; permanent errors failing without retries; the outage policy; rechecking a reminder completed or rescheduled after it was claimed; provider confirmation moving `accepted` to `delivered` or `failed`; capture mode; the recipient allowlist; Resend request shape and error classification (with simulated HTTP); log masking; isolation between users; and the worker's command line.
+- **Reminders (53 tests):** each reminder delivered at most once: no second delivery after editing the title or description, saving unchanged settings, resyncing repeatedly before and after delivery, syncing while the worker holds the job, completing and reopening, a time zone change, or turning email on late, while a new deadline or lead time still gets its replacement; when reminders fire (9:00 AM for day-based leads on date-only deadlines, counting back from midnight for hour-based ones, immediately if the time has passed but the deadline hasn't); rescheduling on edit, completion, reopening, archiving, time zone changes, and email opt-in; four concurrent resyncs leaving exactly one pending reminder; three concurrent workers claiming 30 jobs with no job claimed twice; a crashed worker's job reclaimed after its lease, with the late worker unable to deliver it again; a job that keeps crashing its worker failing after 5 attempts; backoff of 1 then 4 minutes with a stable idempotency key across retries; permanent errors failing without retries; the outage policy; rechecking a reminder completed or rescheduled after it was claimed; provider confirmation moving `accepted` to `delivered` or `failed`; capture mode; the recipient allowlist; Resend request shape and error classification (with simulated HTTP); log masking; isolation between users; and the worker's command line.
 - **Calendar API:** validation (end after start, unique weekdays, series at most a year), conflict warnings for one-time and recurring events with **Save anyway**, deadlines that never block time, overnight events, editing a whole series, idempotent create, bounded windows, archived courses' events hidden and ignored for conflicts, events on Today, deleting a course with its events, and isolation between users.
 
-Seven frontend unit tests cover the week grid's geometry: overnight events split across two days, overlapping events side by side, adjacent ones not, and the visible hour range.
+Eight frontend unit tests cover the week grid's geometry (overnight events split across two days, overlapping events side by side, adjacent ones not, the visible hour range) and when a time-based label must next update.
 
-The Playwright test walks one student through the app: register, add a course, add an overdue assignment, trigger the duplicate warning and the discard prompt, add a weekly class and a clashing meeting on the calendar, save past the conflict warning and see both flagged in the agenda, search, complete, reload, sign out, and sign back in. A second test checks the wrong-password error. A third runs the whole reminder path: it creates an assignment whose reminder is due, runs the real worker process against the test database, finds the reminder in Notifications, opens it to see its delivery history, and checks that a second worker run delivers nothing twice.
+The Playwright test walks one student through the app: register, add a course, add an overdue assignment, trigger the duplicate warning and the discard prompt, add a weekly class and a clashing meeting on the calendar, save past the conflict warning and see both flagged in the agenda, search, complete, reload, sign out, and sign back in. A second test checks the wrong-password error. A third runs the whole reminder path: it creates an assignment whose reminder is due, runs the real worker process against the test database, finds the reminder in Notifications, opens it to see its delivery history, and checks that a second worker run delivers nothing twice. A fourth uses Playwright's controlled clock: it leaves Today open, moves time past an event's end, and checks that "Ended" appears without any request to the API.
 
 An automated accessibility scan ([`frontend/e2e/accessibility.spec.ts`](frontend/e2e/accessibility.spec.ts)) runs [axe-core](https://github.com/dequelabs/axe-core) against WCAG 2.2 AA on every page and dialog (sign-in and registration, Today, the week grid and agenda, assignments, courses, notifications, settings, the assignment dialog, and the event dialog showing a conflict warning) in light and dark mode, at desktop and phone widths: 48 scans per run. Any violation fails CI. Its first run found three real problems, all fixed: finished classes on Today were faded with opacity, which dropped their text below 4.5:1 contrast; deadline chips were smaller than the 24px minimum touch target; and the phone's "New" button had no clear name for screen readers. A scanner can't judge everything (whether a label makes sense, or whether a flow works by keyboard alone), so those still need a manual pass.
 
@@ -338,7 +339,17 @@ Time zones for events:
 
 **The queue is a PostgreSQL table.** Each `reminders` row is one reminder on one channel (in-app or email) and is also the job the worker processes. A broker such as Redis or RabbitMQ would be one more service to run, secure, and back up, and wouldn't remove the need to keep scheduling state in the database. At this scale (a few jobs per student per week) PostgreSQL's row locks are enough. The tradeoff: workers poll (every 30 seconds by default) instead of being pushed work, so a reminder can arrive up to one poll interval late.
 
-**Scheduling stays in sync with the data.** Every change that could affect a reminder (creating, editing, completing, reopening, deleting, archiving a course, changing time zone or email opt-in) recalculates that assignment's pending reminders in the same transaction, so the queue can't disagree with the assignment. The assignment row is locked first, so two simultaneous edits can't both add a reminder; a partial unique index enforces at most one pending reminder per assignment and channel.
+**Scheduling stays in sync with the data.** Every change that could affect a reminder (creating, editing, completing, reopening, deleting, archiving a course, changing time zone or email opt-in) recalculates that assignment's reminders in the same transaction, so the queue can't disagree with the assignment. The assignment row and its reminder rows are locked first: simultaneous edits wait their turn, and the worker, which claims with `SKIP LOCKED`, passes over them until the change commits. A partial unique index enforces at most one pending reminder per assignment and channel.
+
+**Each reminder is delivered at most once.** A reminder is identified by its channel, its lead time, and the due date (or the exact due instant for timed deadlines), not by when it fires. Once one has been delivered, captured, accepted, failed, or skipped, or while a worker is sending it, it is never scheduled again. Only a cancelled one, which was never attempted, can come back.
+
+| Change | What happens to the reminder |
+| --- | --- |
+| Edit the title, description, or course; save unchanged settings; run `--resync` | Nothing. A waiting reminder keeps its row, a sent one stays sent |
+| Change the due date, due time, or lead time | It's a different reminder: the waiting one is cancelled and the new one scheduled (even if the old one was already sent) |
+| Change time zone | A waiting date-only reminder moves to 9:00 AM in the new zone; one already sent isn't sent again |
+| Complete, then reopen | Completing cancels waiting reminders. Reopening brings back ones that were never sent; ones already sent stay sent |
+| Turn email off, then on | Off cancels waiting emails. On adds email only to reminders that haven't fired yet, never a late copy of one already shown in-app |
 
 **When a reminder fires:**
 
@@ -354,7 +365,7 @@ Date-only reminders follow your current time zone, like the overdue rule, so cha
 **How the worker processes a job:**
 
 1. **Claim.** One short transaction selects due rows with `FOR UPDATE SKIP LOCKED`, marks them `processing`, stamps a lease (`locked_until`, 5 minutes) and the worker's id, and counts the attempt. Concurrent workers skip rows another worker has locked, so no job is claimed twice.
-2. **Recheck.** The worker reloads the assignment and skips the reminder if it was completed, deleted, or archived, if it was rescheduled since (a newer reminder replaces it), or if the deadline has already passed.
+2. **Recheck.** The worker reloads the assignment. If it was completed or archived, rescheduled since, or email was turned off, the reminder is `cancelled` (so reopening can bring it back). If the deadline has already passed, it is `skipped`, which is final.
 3. **Deliver, outside any transaction.** In-app: insert the notification (unique per reminder, so a repeat is a no-op) in the same transaction that marks the job delivered. Email: call the adapter with `Idempotency-Key: campusflow-reminder-<id>`.
 4. **Record**, but only if this worker still holds the lease. If another worker took over, the result is discarded (and an in-app write rolled back).
 
@@ -364,7 +375,7 @@ Date-only reminders follow your current time zone, like the overdue rule, so cha
 
 **Outage policy.** After downtime, reminders whose time has passed are still sent if their deadline hasn't passed. Once the deadline has passed, the reminder is skipped and recorded as missed: a late "due soon" message would be wrong, and the assignment already shows as overdue.
 
-**Honest statuses.** `captured` means saved to a local file and never sent. `accepted` means Resend took the message, which isn't proof of delivery. `delivered` requires evidence: the in-app notification exists, or Resend reports `delivered` when the worker asks for the message's last event. Bounces and complaints move the job to `failed`. The edit dialog shows these in plain words.
+**Honest statuses.** `cancelled` means no longer wanted before it was sent; `skipped` means a final policy decision (the deadline passed first, or the address isn't allowed to receive email on this server). `captured` means saved to a local file and never sent. `accepted` means Resend took the message, which isn't proof of delivery. `delivered` requires evidence: the in-app notification exists, or Resend reports `delivered` when the worker asks for the message's last event. Bounces and complaints move the job to `failed`. The edit dialog shows these in plain words.
 
 **Logs** record job ids, outcomes, and masked addresses (`a***@example.edu`); the API key never appears in logs or stored errors.
 
@@ -372,6 +383,7 @@ Date-only reminders follow your current time zone, like the overdue rule, so cha
 
 - If a worker stalls past its lease *while* Resend is processing its request, a second worker may send the same email. Resend's idempotency key drops the duplicate if it arrives within 24 hours.
 - If the assignment changes in the moment between the recheck and the send, one stale email can go out. The new reminder is still scheduled correctly.
+- If the time zone changes while an email is waiting between retries, the replacement email gets a new idempotency key. If Resend had in fact accepted the earlier attempt (a timeout after sending), that one email could arrive twice.
 - Email reminders only reach the account owner until a domain is verified in Resend; others' email reminders fail with the provider's explanation, or are skipped by the allowlist. In-app reminders are unaffected.
 
 ## Design
