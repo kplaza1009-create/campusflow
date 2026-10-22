@@ -1,8 +1,9 @@
 """Application settings, read from environment variables (see .env.example)."""
 
 from functools import lru_cache
+from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -29,6 +30,23 @@ class Settings(BaseSettings):
     register_max_per_ip_per_hour: int = 10
 
     log_level: str = "INFO"
+
+    # Reminder email. "capture" (default) writes messages to a local file and never
+    # sends anything; "resend" sends through Resend with the API key below.
+    email_mode: Literal["capture", "resend"] = "capture"
+    email_capture_dir: str = ".captured-email"
+    resend_api_key: SecretStr | None = None
+    email_from: str = "CampusFlow <onboarding@resend.dev>"
+    # If set, email only goes to these addresses (lowercase); everyone else's reminders
+    # stay in-app. Resend's free test mode can only deliver to the account owner, and
+    # the demo account must never send external email. Real addresses live only here.
+    email_allowed_recipients: list[str] = Field(default=[])
+    app_url: str = "http://localhost:5173"  # used for links in reminder emails
+
+    # Reminder worker.
+    worker_poll_seconds: int = 30
+    reminder_max_attempts: int = 5
+    reminder_lease_minutes: int = 5  # a claimed job is reclaimed if its worker goes quiet this long
 
     @property
     def is_production(self) -> bool:

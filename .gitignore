@@ -29,3 +29,6 @@ frontend/playwright/.cache/
 .vscode/*
 !.vscode/extensions.json
 .idea/
+
+# Locally captured reminder emails (CAMPUSFLOW_EMAIL_MODE=capture)
+.captured-email/
