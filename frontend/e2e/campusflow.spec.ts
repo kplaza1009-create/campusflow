@@ -21,7 +21,9 @@ async function addAssignment(page: Page, title: string, due: string) {
   return dialog
 }
 
-test('student workflow: account, course, assignment, duplicate warning, completion', async ({ page }) => {
+test('student workflow: account, course, assignment, duplicate warning, calendar conflict, completion', async ({
+  page,
+}) => {
   const email = `e2e-${Date.now()}@example.edu`
 
   // Register. A new account lands on Today with a first-run prompt.
@@ -37,8 +39,9 @@ test('student workflow: account, course, assignment, duplicate warning, completi
   await page.getByLabel('Code (optional)').fill('CS248')
   await page.getByRole('radio', { name: 'Teal' }).click()
   await page.getByRole('button', { name: 'Add course' }).click()
-  await expect(page.getByText('Database Systems I')).toBeVisible()
-  await expect(page.getByText('0 open')).toBeVisible()
+  const courseList = page.getByRole('region', { name: 'Active courses' })
+  await expect(courseList.getByText('Database Systems I', { exact: true })).toBeVisible()
+  await expect(courseList.getByText('0 open')).toBeVisible()
 
   // Add an assignment that was due yesterday: it shows as overdue on Today.
   await page.getByRole('link', { name: 'Today' }).first().click()
@@ -60,6 +63,36 @@ test('student workflow: account, course, assignment, duplicate warning, completi
   await dup.getByRole('button', { name: 'Cancel' }).click()
   await dup.getByRole('button', { name: 'Discard' }).click()
   await expect(dup).toBeHidden()
+
+  // Calendar: add a weekly class, then an event that clashes with it.
+  await page.getByRole('link', { name: 'Week' }).first().click()
+  await page.getByRole('button', { name: 'New event' }).click()
+  const cls = page.getByRole('dialog', { name: 'New event' })
+  await cls.getByLabel('Title').fill('Database lecture')
+  await cls.getByLabel('Type').selectOption('class')
+  await expect(cls.getByLabel('Repeats every week')).toBeChecked() // picking "Class" turns on weekly
+  await cls.getByLabel('Course (optional)').selectOption({ label: 'CS248 · Database Systems I' })
+  await cls.getByLabel('Starts').fill('10:00')
+  await cls.getByLabel('Ends').fill('11:15')
+  await cls.getByRole('button', { name: 'Add event' }).click()
+  await expect(cls).toBeHidden()
+  await expect(page.getByRole('button', { name: /^Database lecture, 10:00 AM to 11:15 AM/ })).toBeVisible()
+
+  await page.getByRole('button', { name: 'New event' }).click()
+  const clash = page.getByRole('dialog', { name: 'New event' })
+  await clash.getByLabel('Title').fill('Advisor meeting')
+  await clash.getByLabel('Starts').fill('10:30')
+  await clash.getByLabel('Ends').fill('11:00')
+  await clash.getByRole('button', { name: 'Add event' }).click()
+  await expect(clash.getByText('This overlaps 1 other time on your calendar.')).toBeVisible()
+  await expect(clash.getByText(/Database lecture,/)).toBeVisible()
+  await clash.getByRole('button', { name: 'Save anyway' }).click()
+  await expect(clash).toBeHidden()
+
+  // The accessible agenda lists both, each flagged with what it overlaps.
+  await page.getByRole('button', { name: 'Agenda' }).click()
+  await expect(page.getByText('Overlaps Database lecture')).toBeVisible()
+  await expect(page.getByText('Overlaps Advisor meeting')).toBeVisible()
 
   // The assignment list: search finds it, and only one exists.
   await page.getByRole('link', { name: 'Assignments' }).first().click()
