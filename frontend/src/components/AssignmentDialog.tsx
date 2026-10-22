@@ -17,32 +17,13 @@ import { formatTime, relativeDay, todayIn } from '../dates'
 import { invalidateWork, useCourses } from '../queries'
 import { useUser } from '../session'
 import { errorMessage } from '../errors'
+import { isTyping, remember, remembered } from '../remember'
 import { AssignmentDialogContext } from './assignmentDialogContext'
 
 // Remembered between sessions on this device, so adding several assignments
 // for one course takes one field instead of three.
 const LAST_COURSE = 'campusflow:last-course'
 const LAST_REMINDER = 'campusflow:last-reminder'
-
-function remembered(key: string): string | null {
-  try {
-    return localStorage.getItem(key)
-  } catch {
-    return null
-  }
-}
-function remember(key: string, value: string) {
-  try {
-    localStorage.setItem(key, value)
-  } catch {
-    /* storage unavailable (private mode); nothing to remember */
-  }
-}
-
-function isTyping(target: EventTarget | null): boolean {
-  const el = target as HTMLElement | null
-  return !!el && (el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName))
-}
 
 export function AssignmentDialogProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<{ open: boolean; editing: Assignment | null; session: number }>({

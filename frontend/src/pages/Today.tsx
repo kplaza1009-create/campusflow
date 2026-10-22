@@ -1,12 +1,13 @@
-import { Plus } from 'lucide-react'
-import type { ReactNode } from 'react'
+import { Plus, TriangleAlert } from 'lucide-react'
+import { useState, type ReactNode } from 'react'
 import { Link } from 'react-router'
 
-import type { Assignment } from '../api'
+import type { Assignment, Occurrence } from '../api'
 import { AssignmentRow } from '../components/AssignmentRow'
 import { useAssignmentDialog } from '../components/assignmentDialogContext'
+import { useEventDialog } from '../components/eventDialogContext'
 import { BlockError, Empty, Loading } from '../components/States'
-import { addDays, formatLongDate, formatMonthDay, formatWeekday, plural, relativeDay } from '../dates'
+import { addDays, formatLongDate, formatMonthDay, formatTime, formatWeekday, plural, relativeDay } from '../dates'
 import { useCourses, useToday } from '../queries'
 
 const DAYS_AHEAD = 7
@@ -72,6 +73,18 @@ export function TodayPage() {
             </Block>
           )}
 
+          <Block title="Schedule" count={data?.events.length} link="/week" linkLabel="Open week">
+            {today.isPending ? (
+              <Loading label="Loading today's schedule" rows={2} />
+            ) : today.isError ? (
+              <BlockError what="today's schedule" error={today.error} retry={() => today.refetch()} />
+            ) : data!.events.length === 0 ? (
+              <Empty compact>No classes or events today.</Empty>
+            ) : (
+              <Schedule items={data!.events} today={data!.today} />
+            )}
+          </Block>
+
           <Block title="Due today" count={data?.due_today.length}>
             {today.isPending ? (
               <Loading label="Loading today's assignments" rows={2} />
@@ -88,7 +101,7 @@ export function TodayPage() {
             )}
           </Block>
 
-          <Block title="Next 7 days" count={data?.upcoming.length} link>
+          <Block title="Next 7 days" count={data?.upcoming.length} link="/assignments" linkLabel="All open assignments">
             {today.isPending ? (
               <Loading label="Loading upcoming assignments" rows={3} />
             ) : today.isError ? (
@@ -117,12 +130,14 @@ function Block({
   count,
   tone,
   link,
+  linkLabel,
   children,
 }: {
   title: string
   count?: number
   tone?: 'late'
-  link?: boolean
+  link?: string
+  linkLabel?: string
   children: ReactNode
 }) {
   const id = `h-${title.replaceAll(' ', '-').toLowerCase()}`
@@ -134,8 +149,8 @@ function Block({
           {count !== undefined && count > 0 && <span className="muted num"> {count}</span>}
         </h2>
         {link && (
-          <Link to="/assignments" className="meta">
-            All open assignments
+          <Link to={link} className="meta">
+            {linkLabel}
           </Link>
         )}
       </div>
@@ -210,5 +225,49 @@ function WeekStrip({ data }: { data: ReturnType<typeof useToday>['data'] }) {
         })}
       </div>
     </section>
+  )
+}
+
+function Schedule({ items, today }: { items: Occurrence[]; today: string }) {
+  const events = useEventDialog()
+  const [now] = useState(() => new Date().toISOString()) // refreshed whenever Today refetches
+  const titles = new Map(items.map((o) => [o.event_id, o.title]))
+  return (
+    <ul className="list">
+      {items.map((o) => (
+        <li key={`${o.event_id}-${o.start}`}>
+          <button
+            type="button"
+            className={o.end < now ? 'schedule-row is-past' : 'schedule-row'}
+            onClick={() => events.open({ eventId: o.event_id })}
+          >
+            <span className="agenda-time num">
+              {o.start_date < today ? 'Until ' : `${formatTime(o.start_time)}–`}
+              {formatTime(o.end_time)}
+              {o.end_date > today && <span className="time-note">ends next day</span>}
+            </span>
+            <span className="agenda-main">
+              <span className="a-title">{o.title}</span>
+              <span className="a-meta">
+                <span
+                  className="course-dot"
+                  style={{ background: o.course?.color ?? 'var(--faint)' }}
+                  aria-hidden="true"
+                />
+                <span className="course-name">
+                  {[o.course?.code ?? o.course?.name, o.location].filter(Boolean).join(' · ') || 'No course'}
+                </span>
+              </span>
+            </span>
+            {o.conflicts_with.length > 0 && (
+              <span className="agenda-conflict">
+                <TriangleAlert size={13} aria-hidden="true" />
+                Overlaps {o.conflicts_with.map((id) => titles.get(id) ?? 'another event').join(', ')}
+              </span>
+            )}
+          </button>
+        </li>
+      ))}
+    </ul>
   )
 }

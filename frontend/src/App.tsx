@@ -9,6 +9,7 @@ import { AuthPage } from './pages/Auth'
 import { CoursesPage } from './pages/Courses'
 import { SettingsPage } from './pages/Settings'
 import { TodayPage } from './pages/Today'
+import { WeekPage } from './pages/Week'
 import { SESSION_KEY, useSession } from './session'
 
 const queryClient: QueryClient = new QueryClient({
@@ -85,6 +86,7 @@ export default function App() {
           <Route element={<RequireAuth />}>
             <Route element={<Shell />}>
               <Route index element={<TodayPage />} />
+              <Route path="/week" element={<WeekPage />} />
               <Route path="/assignments" element={<AssignmentsPage />} />
               <Route path="/courses" element={<CoursesPage />} />
               <Route path="/settings" element={<SettingsPage />} />

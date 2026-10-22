@@ -16,7 +16,16 @@ export function invalidateWork(qc: QueryClient) {
     qc.invalidateQueries({ queryKey: ['today'] }),
     qc.invalidateQueries({ queryKey: ['assignments'] }),
     qc.invalidateQueries({ queryKey: ['courses'] }),
+    qc.invalidateQueries({ queryKey: ['calendar'] }),
   ])
+}
+
+export function useCalendar(start: string, days = 7) {
+  return useQuery({
+    queryKey: ['calendar', start, days],
+    queryFn: () => api.calendar(start, days),
+    placeholderData: (prev) => prev, // keep the old week visible while the next one loads
+  })
 }
 
 export function useCourses(includeArchived = false) {

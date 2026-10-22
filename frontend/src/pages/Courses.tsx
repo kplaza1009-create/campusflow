@@ -270,11 +270,19 @@ function CourseForm({ course, onDone, onDelete }: { course?: Course; onDone: () 
   )
 }
 
+/** "3 assignments and 2 calendar events", or "" when there's nothing else to delete. */
+function what(impact: { assignments: number; events: number }): string {
+  const parts = []
+  if (impact.assignments) parts.push(plural(impact.assignments, 'assignment'))
+  if (impact.events) parts.push(plural(impact.events, 'calendar event'))
+  return parts.join(' and ')
+}
+
 function DeleteCourseDialog({ course, onClose }: { course: Course; onClose: () => void }) {
   const qc = useQueryClient()
   const ref = useRef<HTMLDialogElement>(null)
   const ids = useId()
-  const [impact, setImpact] = useState<number | null>(null)
+  const [impact, setImpact] = useState<{ assignments: number; events: number } | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [understood, setUnderstood] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -284,7 +292,7 @@ function DeleteCourseDialog({ course, onClose }: { course: Course; onClose: () =
     setLoadError(null)
     api
       .deletionImpact(course.id)
-      .then((r) => setImpact(r.assignments))
+      .then(setImpact)
       .catch((err: unknown) => setLoadError(errorMessage(err)))
   }
 
@@ -301,7 +309,7 @@ function DeleteCourseDialog({ course, onClose }: { course: Course; onClose: () =
     try {
       await api.deleteCourse(course.id, impact)
       await invalidateWork(qc)
-      toast.success(`Deleted ${course.name}${impact ? ` and ${plural(impact, 'assignment')}` : ''}`)
+      toast.success(`Deleted ${course.name}${what(impact) ? ` and ${what(impact)}` : ''}`)
       onClose()
     } catch (err) {
       setError(errorMessage(err))
@@ -345,10 +353,10 @@ function DeleteCourseDialog({ course, onClose }: { course: Course; onClose: () =
           <>
             <p>
               This permanently deletes the course
-              {impact > 0 ? (
+              {what(impact) ? (
                 <>
                   {' '}
-                  and <strong className="num">{plural(impact, 'assignment')}</strong> in it
+                  and <strong className="num">{what(impact)}</strong> in it
                 </>
               ) : null}
               . This can&apos;t be undone.
@@ -356,9 +364,7 @@ function DeleteCourseDialog({ course, onClose }: { course: Course; onClose: () =
             {!course.archived && <p className="muted">To keep the work but hide the course, archive it instead.</p>}
             <label className="check-label">
               <input type="checkbox" checked={understood} onChange={(e) => setUnderstood(e.target.checked)} />
-              {impact > 0
-                ? `Yes, delete the course and its ${plural(impact, 'assignment')}`
-                : 'Yes, delete this course'}
+              {what(impact) ? `Yes, delete the course and its ${what(impact)}` : 'Yes, delete this course'}
             </label>
           </>
         )}

@@ -52,6 +52,80 @@ export type TodayData = {
   overdue: Assignment[]
   due_today: Assignment[]
   upcoming: Assignment[]
+  events: Occurrence[]
+}
+
+export type EventKind = 'class' | 'study' | 'meeting' | 'other'
+
+export type OneTimeSchedule = {
+  type: 'once'
+  start_date: string
+  start_time: string
+  end_date: string
+  end_time: string
+}
+
+export type WeeklySchedule = {
+  type: 'weekly'
+  weekdays: number[] // 0 = Monday
+  start_time: string
+  end_time: string // earlier than start_time means it ends the next day
+  first_date: string
+  last_date: string
+}
+
+export type CalendarEvent = {
+  id: number
+  title: string
+  kind: EventKind
+  course: CourseBrief | null
+  location: string | null
+  recurring: boolean
+  schedule: OneTimeSchedule | WeeklySchedule
+  time_zone: string // a weekly class keeps the zone it was created in
+  ends_next_day: boolean
+  time_note: 'ambiguous_earlier' | null
+}
+
+export type EventInput = {
+  title: string
+  kind: EventKind
+  course_id: number | null
+  location: string | null
+  schedule: OneTimeSchedule | WeeklySchedule
+  allow_conflicts?: boolean
+}
+
+/** One meeting of an event, in the account's current time zone. */
+export type Occurrence = {
+  event_id: number
+  title: string
+  kind: EventKind
+  course: CourseBrief | null
+  location: string | null
+  recurring: boolean
+  start: string
+  end: string
+  start_date: string
+  start_time: string
+  end_date: string
+  end_time: string
+  conflicts_with: number[]
+}
+
+export type CalendarData = {
+  start: string
+  end: string
+  time_zone: string
+  occurrences: Occurrence[]
+  deadlines: Assignment[]
+}
+
+export type ScheduleConflict = {
+  code: 'schedule_conflict'
+  message: string
+  conflicts: Occurrence[]
+  total: number
 }
 
 export type DuplicateWarning = {
@@ -70,6 +144,11 @@ export class ApiError extends Error {
     this.status = status
     this.body = body
     this.fields = fields
+  }
+
+  get scheduleConflict(): ScheduleConflict | null {
+    const b = this.body as Partial<ScheduleConflict> | null
+    return this.status === 409 && b?.code === 'schedule_conflict' ? (b as ScheduleConflict) : null
   }
 
   get duplicate(): DuplicateWarning | null {
@@ -151,9 +230,20 @@ export const api = {
     request<Course>('POST', '/api/courses', body, { idempotencyKey }),
   updateCourse: (id: number, body: CourseInput & { archived: boolean }) =>
     request<Course>('PATCH', `/api/courses/${id}`, body),
-  deletionImpact: (id: number) => request<{ assignments: number }>('GET', `/api/courses/${id}/deletion-impact`),
-  deleteCourse: (id: number, expectedAssignments: number) =>
-    request<void>('DELETE', `/api/courses/${id}?expected_assignments=${expectedAssignments}`),
+  deletionImpact: (id: number) =>
+    request<{ assignments: number; events: number }>('GET', `/api/courses/${id}/deletion-impact`),
+  deleteCourse: (id: number, expected: { assignments: number; events: number }) =>
+    request<void>(
+      'DELETE',
+      `/api/courses/${id}?expected_assignments=${expected.assignments}&expected_events=${expected.events}`,
+    ),
+
+  calendar: (start: string, days = 7) => request<CalendarData>('GET', `/api/calendar?start=${start}&days=${days}`),
+  event: (id: number) => request<CalendarEvent>('GET', `/api/events/${id}`),
+  createEvent: (body: EventInput, idempotencyKey: string) =>
+    request<CalendarEvent>('POST', '/api/events', body, { idempotencyKey }),
+  updateEvent: (id: number, body: EventInput) => request<CalendarEvent>('PUT', `/api/events/${id}`, body),
+  deleteEvent: (id: number) => request<void>('DELETE', `/api/events/${id}`),
 
   today: () => request<TodayData>('GET', '/api/today'),
   assignments: (query: URLSearchParams) => request<Assignment[]>('GET', `/api/assignments?${query}`),
@@ -166,6 +256,13 @@ export const api = {
 }
 
 export type CourseInput = { name: string; code: string | null; instructor: string | null; color: string }
+
+export const EVENT_KINDS: { value: EventKind; label: string }[] = [
+  { value: 'class', label: 'Class' },
+  { value: 'study', label: 'Study session' },
+  { value: 'meeting', label: 'Meeting' },
+  { value: 'other', label: 'Other' },
+]
 
 export const COURSE_COLORS = [
   { value: '#2563eb', name: 'Blue' },

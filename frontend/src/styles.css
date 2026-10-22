@@ -327,7 +327,7 @@ textarea {
     inset: auto 0 0 0;
     z-index: 10;
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(5, 1fr);
     padding-bottom: env(safe-area-inset-bottom);
     background: var(--ground);
     border-top: 1px solid var(--border);
@@ -1256,4 +1256,367 @@ dialog.sheet::backdrop {
 .week-day:disabled {
   color: inherit;
   cursor: default;
+}
+
+/* ---- Week ----------------------------------------------------------------------- */
+
+.page.wide {
+  max-width: 1200px;
+}
+
+.hint {
+  color: var(--muted);
+  font-size: var(--fs-small);
+  line-height: 16px;
+}
+
+.week-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px 12px;
+}
+.week-nav {
+  display: flex;
+  gap: 6px;
+}
+
+/* The grid scrolls sideways inside its own frame on narrow screens, never the page. */
+.week-grid {
+  position: relative;
+  overflow-x: auto;
+}
+.wg-head,
+.wg-allday,
+.wg-body {
+  display: grid;
+  grid-template-columns: 56px repeat(7, minmax(88px, 1fr));
+  min-width: 672px;
+}
+.wg-head {
+  border-bottom: 1px solid var(--rule);
+}
+.wg-day {
+  padding: 10px 8px;
+  color: var(--muted);
+  font-size: var(--fs-small);
+  line-height: 16px;
+  border-left: 1px solid var(--rule);
+}
+.wg-day b {
+  color: var(--text);
+  font-weight: 600;
+}
+.wg-day.is-today,
+.wg-day.is-today b {
+  color: var(--accent);
+  font-weight: 650;
+}
+.wg-allday {
+  border-bottom: 1px solid var(--rule);
+}
+.wg-gutter-label {
+  padding: 8px 8px 0 0;
+  text-align: right;
+  color: var(--faint);
+  font-size: 11px;
+  line-height: 16px;
+}
+.wg-allday-cell {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  min-width: 0;
+  padding: 4px;
+  border-left: 1px solid var(--rule);
+}
+.wg-body {
+  position: relative;
+}
+.wg-hours {
+  position: relative;
+}
+.wg-hours span {
+  position: absolute;
+  right: 8px;
+  translate: 0 -50%;
+  color: var(--faint);
+  font-size: 11px;
+  line-height: 14px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.wg-col {
+  position: relative;
+  min-width: 0;
+  border-left: 1px solid var(--rule);
+  background-image: linear-gradient(to bottom, var(--rule) 1px, transparent 1px);
+}
+.wg-col.is-today {
+  background-color: color-mix(in srgb, var(--accent) 4%, transparent);
+}
+
+.wg-event {
+  position: absolute;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 6px;
+  overflow: hidden;
+  text-align: left;
+  color: var(--text);
+  background: color-mix(in srgb, var(--ev) 16%, var(--surface));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ev) 35%, transparent);
+  font-size: var(--fs-small);
+  line-height: 16px;
+  cursor: pointer;
+  transition:
+    transform 140ms var(--ease-out),
+    background-color 120ms ease;
+}
+.wg-event:active {
+  transform: scale(0.98);
+}
+.wg-event:focus-visible {
+  z-index: 3;
+}
+@media (hover: hover) and (pointer: fine) {
+  .wg-event:hover {
+    background: color-mix(in srgb, var(--ev) 24%, var(--surface));
+  }
+}
+.ev-title {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ev-title svg {
+  flex: none;
+  color: var(--negative);
+}
+.ev-time {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 11px;
+}
+.wg-event.is-short .ev-time {
+  display: none;
+}
+/* Red marks the fact that needs a decision: two things at once. */
+.wg-event.is-conflict {
+  box-shadow: inset 0 0 0 1.5px var(--negative);
+}
+
+.wg-deadline {
+  position: absolute;
+  z-index: 2;
+  left: 2px;
+  right: 2px;
+  translate: 0 -50%;
+}
+.deadline-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  padding: 2px 6px;
+  border: 1px solid var(--control);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 11px;
+  line-height: 16px;
+  text-align: left;
+  cursor: pointer;
+}
+.deadline-chip .chip-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.deadline-chip.is-late {
+  color: var(--negative);
+  border-color: color-mix(in srgb, var(--negative) 45%, transparent);
+}
+.deadline-chip.is-done {
+  color: var(--muted);
+}
+
+.wg-now {
+  position: absolute;
+  z-index: 2;
+  left: 0;
+  right: 0;
+  height: 0;
+  border-top: 2px solid var(--accent);
+  pointer-events: none;
+}
+.wg-now::before {
+  content: '';
+  position: absolute;
+  left: -4px;
+  top: -5px;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+.wg-empty {
+  border-top: 1px solid var(--rule);
+}
+
+/* Agenda */
+.agenda {
+  display: grid;
+  gap: 20px;
+}
+.agenda-day {
+  display: grid;
+  gap: 8px;
+}
+.agenda-heading {
+  font-size: var(--fs-body);
+  line-height: 20px;
+  color: var(--muted);
+}
+.agenda-heading.is-today {
+  color: var(--accent);
+}
+.agenda-row {
+  display: grid;
+  grid-template-columns: 170px minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 16px;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+.agenda-time {
+  display: grid;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.time-note {
+  color: var(--muted);
+  font-size: var(--fs-small);
+  font-weight: 400;
+}
+.agenda-main {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.agenda-conflict,
+.late-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--negative);
+  font-size: var(--fs-small);
+  font-weight: 550;
+}
+@media (hover: hover) and (pointer: fine) {
+  .agenda-row:hover .a-title {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    text-decoration-thickness: 1px;
+  }
+}
+@media (max-width: 760px) {
+  .agenda-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+}
+
+/* Event form */
+.days-field {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.days-field legend {
+  padding: 0;
+  margin-bottom: 6px;
+  font-weight: 550;
+}
+.day-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.day-toggle {
+  min-width: 46px;
+  height: 34px;
+  padding: 0 8px;
+  border: 1px solid var(--control);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  font-weight: 550;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease,
+    transform 140ms var(--ease-out);
+}
+.day-toggle:active {
+  transform: scale(0.96);
+}
+.day-toggle[aria-pressed='true'] {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--primary-ink);
+}
+.conflict-list {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.conflict-list li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Today: schedule */
+.schedule-row {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 52px;
+  width: 100%;
+  padding: 8px 16px;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+.schedule-row.is-past {
+  opacity: 0.6;
+}
+@media (max-width: 520px) {
+  .schedule-row {
+    grid-template-columns: 96px minmax(0, 1fr);
+  }
+  .schedule-row .agenda-conflict {
+    grid-column: 2;
+  }
 }

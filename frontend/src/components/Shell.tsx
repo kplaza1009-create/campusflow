@@ -1,14 +1,16 @@
-import { BookOpen, ListChecks, Plus, Settings, Sun } from 'lucide-react'
+import { BookOpen, CalendarDays, ListChecks, Plus, Settings, Sun } from 'lucide-react'
 import { NavLink, Outlet } from 'react-router'
 
 import { useToday } from '../queries'
 import { useUser } from '../session'
 import { AssignmentDialogProvider } from './AssignmentDialog'
 import { useAssignmentDialog } from './assignmentDialogContext'
+import { EventDialogProvider } from './EventDialog'
 import { Logo } from './Logo'
 
 const NAV = [
   { to: '/', label: 'Today', icon: Sun, end: true },
+  { to: '/week', label: 'Week', icon: CalendarDays, end: false },
   { to: '/assignments', label: 'Assignments', icon: ListChecks, end: false },
   { to: '/courses', label: 'Courses', icon: BookOpen, end: false },
   { to: '/settings', label: 'Settings', icon: Settings, end: false },
@@ -17,7 +19,9 @@ const NAV = [
 export function Shell() {
   return (
     <AssignmentDialogProvider>
-      <ShellLayout />
+      <EventDialogProvider>
+        <ShellLayout />
+      </EventDialogProvider>
     </AssignmentDialogProvider>
   )
 }
