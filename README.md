@@ -1,0 +1,278 @@
+# CampusFlow
+
+A college planner for keeping every course and deadline in one place: what's overdue, what's due today, and what's coming up this week, in your own time zone.
+
+Built as a full-stack portfolio project: a React + TypeScript frontend, a FastAPI backend, PostgreSQL, and (in a later milestone) a separate worker for durable reminders.
+
+![Today view](docs/screenshots/today-light.png)
+
+## Status
+
+| Milestone | Scope | State |
+| --- | --- | --- |
+| 1 | Accounts, courses, assignments, persistent storage | **Done** |
+| 2 | Weekly calendar, recurring classes, conflict detection | Not started |
+| 3 | Durable reminders and notification settings | Not started |
+| 4 | Demo account, deployment, usability, portfolio docs | Not started |
+
+## The problem
+
+Students juggle deadlines from four to six courses, each with its own syllabus, LMS page, and habits. Deadlines get missed less from forgetting than from not seeing them in one place at the right time. CampusFlow's target workflows:
+
+1. **Morning check:** open Today and see what's overdue, what's due today, and the week ahead.
+2. **Capture fast:** a professor announces a deadline, so press <kbd>N</kbd>, type a title, and save. The last course you used is remembered.
+3. **Find and filter:** search assignments, filter by course, status, overdue, or date range, and sort by deadline.
+4. **Finish:** check an assignment off. It's saved before it's shown as done, and it can be undone.
+5. **End the semester:** archive a course to keep its history without cluttering the lists.
+
+## Screenshots
+
+| | |
+| --- | --- |
+| ![Assignments](docs/screenshots/assignments-light.png) | ![New assignment](docs/screenshots/dialog-light.png) |
+| ![Courses](docs/screenshots/courses-light.png) | ![Settings](docs/screenshots/settings-light.png) |
+| ![Today in dark mode](docs/screenshots/today-dark.png) | ![Sign in](docs/screenshots/login.png) |
+
+<img src="docs/screenshots/today-phone.png" alt="Today on a phone" width="300">
+
+## Architecture
+
+```mermaid
+flowchart LR
+  B[Browser<br/>React + TypeScript] -- "/api/* (same origin in dev via Vite proxy)<br/>cookie + X-CSRF-Token" --> A[FastAPI API<br/>sync route handlers]
+  A -- SQLAlchemy 2.x<br/>psycopg 3 --> D[(PostgreSQL 16)]
+  W[Reminder worker<br/>Milestone 3] -. polls queue .-> D
+```
+
+One frontend, one API, one database, plus one worker in Milestone 3. Nothing else is needed yet.
+
+**How a request flows:** the browser calls `/api/...` with the session cookie. FastAPI loads the session (dependency `require_auth`), checks the CSRF header on writes, and runs the handler in its threadpool. The handler reads or writes with SQLAlchemy, filtering every query by the signed-in user's ID, then commits. Pydantic validates the input on the way in and shapes the output on the way out. The frontend caches responses with TanStack Query and refetches the affected views after every write.
+
+### Database
+
+```mermaid
+erDiagram
+  users ||--o{ sessions : "signs in with"
+  users ||--o{ courses : owns
+  users ||--o{ assignments : owns
+  courses ||--o{ assignments : "contains (same user)"
+  users {
+    bigint id PK
+    varchar email "unique, lowercase"
+    varchar password_hash "argon2id"
+    varchar time_zone "IANA, e.g. America/New_York"
+  }
+  sessions {
+    bigint id PK
+    bigint user_id FK
+    bytea token_hash "sha256 of cookie token"
+    varchar csrf_token
+    timestamptz expires_at
+  }
+  courses {
+    bigint id PK
+    bigint user_id FK
+    varchar name
+    varchar code "optional"
+    varchar instructor "optional"
+    varchar color "#rrggbb from a fixed palette"
+    timestamptz archived_at "null = active"
+    uuid idempotency_key "unique per user"
+  }
+  assignments {
+    bigint id PK
+    bigint user_id FK
+    bigint course_id FK "composite FK (user_id, course_id)"
+    varchar title
+    text description
+    date due_date "date-only deadline"
+    timestamptz due_at "exact deadline (UTC)"
+    timestamptz completed_at "null = open"
+    int reminder_minutes "null = none"
+    uuid idempotency_key "unique per user"
+  }
+  rate_limit_events {
+    bigint id PK
+    varchar bucket "e.g. login:email:..."
+    timestamptz created_at
+  }
+```
+
+Exactly one of `due_date` or `due_at` is set; a check constraint enforces it.
+
+## Tech stack and versions
+
+| Layer | Choice | Version |
+| --- | --- | --- |
+| Frontend | React, TypeScript, Vite | 19.3, 6.0, 8.3 |
+| Data fetching | TanStack Query | 5.104 |
+| Routing | React Router | 8.5 |
+| UI details | lucide-react icons, Sonner toasts, Instrument Sans (self-hosted) | 1.61, 2.0, 5.x |
+| Backend | Python, FastAPI, Uvicorn | 3.12+, 0.159, 0.54 |
+| Database | PostgreSQL, SQLAlchemy, Alembic, psycopg | 16, 2.1, 1.20, 3.3 |
+| Validation | Pydantic, pydantic-settings | 2.14, 2.16 |
+| Passwords | argon2-cffi (Argon2id) | 25.1 |
+| Tests | pytest, Playwright | 9.1, 1.64 |
+| Tooling | uv, ruff, mypy (strict), oxlint, Prettier | 0.11, 0.17, 2.4, 1.x, 3.x |
+
+Exact versions are pinned in `backend/uv.lock` and `frontend/package-lock.json`. Node is pinned to 24 in `frontend/.nvmrc`. Node 24 is the newest LTS line today; Node 26 becomes Active LTS on October 27, 2026, and moving to it is a one-line change.
+
+## Running it locally
+
+Prerequisites: PostgreSQL 16, [uv](https://docs.astral.sh/uv/), and Node 24.
+
+```bash
+# 1. Database role (once). CREATEDB lets the tests create throwaway databases.
+createuser --createdb --pwprompt campusflow      # password: campusflow (dev only)
+
+# 2. Backend
+cd backend
+cp .env.example .env                             # adjust if your database differs
+uv sync                                          # installs exact locked versions
+uv run python -m scripts.ensure_db               # creates the database if missing
+uv run alembic upgrade head                      # applies migrations
+uv run uvicorn app.main:app --reload --port 8000
+
+# 3. Frontend (another terminal)
+cd frontend
+npm ci
+npm run dev                                      # http://localhost:5173
+```
+
+The Vite dev server proxies `/api` to the API on port 8000, so the browser sees a single origin.
+
+### Environment variables
+
+All backend settings use the `CAMPUSFLOW_` prefix. See [`backend/.env.example`](backend/.env.example). The important ones:
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `CAMPUSFLOW_DATABASE_URL` | local `campusflow` DB | SQLAlchemy URL with the `postgresql+psycopg://` driver |
+| `CAMPUSFLOW_ALLOWED_ORIGINS` | Vite dev origins | JSON list. Writes from any other origin are rejected |
+| `CAMPUSFLOW_SESSION_COOKIE_SECURE` | `false` | **Must be `true` in production** (HTTPS-only cookie) |
+| `CAMPUSFLOW_SESSION_COOKIE_NAME` | `cf_session` | Use `__Host-cf_session` in production |
+| `CAMPUSFLOW_SESSION_IDLE_DAYS` / `_ABSOLUTE_DAYS` | 7 / 30 | Sliding and absolute session lifetimes |
+| `CAMPUSFLOW_LOGIN_MAX_FAILURES_PER_EMAIL` | 5 per 15 min | Also a per-IP limit (30) |
+
+No secrets are committed. `.env` files are git-ignored.
+
+## Testing and checks
+
+```bash
+# Backend: each run creates its own PostgreSQL database and drops it afterwards
+cd backend
+uv run ruff format --check . && uv run ruff check . && uv run mypy app tests scripts
+uv run pytest --cov=app
+
+# Frontend
+cd frontend
+npm run format:check && npm run lint && npm run typecheck && npm run build
+
+# Browser tests: start their own API (on a separate campusflow_e2e database) and dev server
+npx playwright install chromium   # once
+npm run test:e2e
+```
+
+GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs all three jobs on every push and pull request, with a PostgreSQL 16 service container.
+
+What the 49 backend tests cover (98% line coverage):
+
+- **Auth:** HTTP-only cookie, email normalization, generic login errors, server-side logout (a replayed cookie fails), idle and absolute expiry, CSRF header required for writes, cross-origin writes rejected, login throttling that survives across clients, password change signing out other devices, account deletion.
+- **Isolation:** another user's records return 404 by ID for read, edit, complete, delete, archive, and deletion-impact. An assignment can't be attached to another user's course, and the database itself rejects such a row. Idempotency keys are scoped per user.
+- **Assignments:** validation, lifecycle, every filter, title search with literal `%` and `_`, both sort orders, the Today grouping, idempotent create (including six concurrent double-submits), and the likely-duplicate warning and its exact matching rule.
+- **Courses:** validation, idempotent create, archive keeps data, and delete requires the confirmed count and cascades in one transaction.
+- **Time:** spring-forward gaps, fall-back overlaps, overdue exactly after 11:59 PM local, time zone changes, and "today" computed in the user's zone rather than UTC.
+
+The Playwright test walks one student through the app: register, add a course, add an overdue assignment, trigger the duplicate warning and the discard prompt, search, complete, reload, sign out, and sign back in. A second test checks the wrong-password error.
+
+## Key decisions
+
+### Synchronous SQLAlchemy with `def` route handlers
+
+Every handler is a plain `def`, not `async def`. FastAPI runs `def` handlers in a threadpool, so a blocking database call ties up one worker thread while the event loop keeps serving other requests. Mixing `async def` with a blocking driver would freeze the loop for every request during each query. Sync SQLAlchemy is also simpler to read, debug, and test. The tradeoff is that concurrency is bounded by the threadpool size (40 by default), which is far beyond what this app needs. A busier deployment would add API instances before needing async.
+
+### Sessions instead of JWTs
+
+Login creates a row in `sessions`, and the cookie holds a random 256-bit token. Only its SHA-256 is stored, so a leaked database can't be replayed as cookies. Logging out deletes the row, which ends the session immediately; a JWT can't be revoked that simply. The cookie is `HttpOnly` (unreadable by JavaScript), `SameSite=Lax`, and `Secure` in production. Sessions slide for 7 days of inactivity and end after 30 days regardless. Changing your password deletes every other session.
+
+### CSRF and origins
+
+Two layers:
+
+1. Each session has its own CSRF token. The frontend gets it from `/api/auth/session` and sends it as `X-CSRF-Token` on every write. A malicious site can make the browser send the cookie, but it can't read the token.
+2. Middleware rejects any `POST`, `PUT`, `PATCH`, or `DELETE` whose `Origin` header isn't allow-listed. This covers login and registration, which happen before a session exists.
+
+CORS is configured explicitly for the same allow-list. It only matters if the frontend and API end up on different origins in production (decided in Milestone 4).
+
+### Login rate limiting in PostgreSQL
+
+Failed logins are rows in `rate_limit_events`, keyed by email and by IP: 5 failures per email or 30 per IP in 15 minutes. Because the counter is in the database, the limit holds across multiple API instances and restarts. A transaction-scoped advisory lock per key stops parallel requests from all slipping under the limit at once. A successful login clears that email's failures, and old rows are pruned.
+
+### Ownership is enforced twice
+
+Every query filters by the user ID taken from the session, never from the request. Another user's record looks exactly like a missing one (404), so IDs can't be probed. As a backstop, assignments reference courses through a composite foreign key on `(user_id, course_id)` → `courses(user_id, id)`. Even a bug in the API couldn't link an assignment to someone else's course; PostgreSQL would refuse the row.
+
+### Duplicates: two different problems
+
+- **Double-clicks and retries** create true duplicates. The form generates a UUID when it opens and sends it as `Idempotency-Key`. It's stored on the row under a unique `(user_id, idempotency_key)` constraint, and the insert uses `ON CONFLICT DO NOTHING`. A repeat returns the original record (`200`, `Idempotent-Replayed: true`) even when both requests arrive at the same moment. The test fires six concurrent identical requests and expects exactly one row.
+- **Likely duplicates** are the user's call. If the same course already has an assignment with the same title (trimmed, case-insensitive) on the same due date, the API answers `409 likely_duplicate` with the matches. The form shows them, and **Save anyway** resends with `allow_duplicate: true`.
+
+### Archive vs. delete
+
+Archiving sets `archived_at`. Every assignment stays, but the course is hidden from Today, lists, and pickers, and can't get new work until it's restored. Deleting first shows how many assignments will go with it. The `DELETE` request must include that confirmed number (`?expected_assignments=7`). The API locks the course row, recounts, and refuses with `409` if the number changed, so you never delete more than you agreed to. The cascade happens in the same transaction.
+
+### Time zones
+
+Each account has an IANA time zone, set from the browser at sign-up and changeable in Settings.
+
+| Kind of deadline | Stored as | Example |
+| --- | --- | --- |
+| Date-only ("due Friday") | `due_date DATE` | `2026-10-23` |
+| Exact time ("due Friday 5 PM") | `due_at TIMESTAMPTZ` in UTC | `2026-10-23 21:00:00+00` |
+
+Rules, all computed on the server so every view agrees:
+
+- **A date-only deadline never moves.** Due Oct 23 stays Oct 23 whatever your zone. It becomes overdue once Oct 23 has fully passed in your current zone, at local midnight after 11:59 PM. Example: due Oct 14 in New York is still on time at 11:59:59 PM EDT and overdue at 12:00 AM. If you switch to Los Angeles, it's overdue at midnight Pacific instead.
+- **An exact deadline keeps its moment.** 9:00 AM in New York is 13:00 UTC. Switch to Los Angeles and it shows as 6:00 AM, the same instant. Switch to London and a 11:30 PM New York deadline shows as 4:30 AM the next day.
+- **Times that don't exist are rejected.** On March 8, 2026, New York clocks jump from 2:00 to 3:00 AM, so "due 2:30 AM" gets a clear error.
+- **Times that happen twice are flagged.** On November 1, 2026, 1:30 AM happens twice. CampusFlow uses the first one (EDT) and tells you so after saving.
+- **Today and "next 7 days"** use your zone's calendar date, not UTC. At 10 PM in New York it's still today, even though it's already tomorrow in UTC.
+
+Settings shows a live preview of what a time zone change will do before you save.
+
+## Design
+
+The interface follows three design skills: Impeccable's rules for product UI, Emil Kowalski's design-engineering and motion guidance, and the Taste skill's app-screen study. Concretely:
+
+- **Layout:** one typeface (Instrument Sans, chosen because it has true tabular figures for dates and counts) and flat surfaces split by 1px lines.
+- **Color:** reserved for course identity, overdue status, and the single near-black primary action. Light and dark themes follow the OS.
+- **Motion:** feedback only: buttons press to 0.97 scale, dialogs enter in 180ms with a strong ease-out, and everything respects reduced-motion settings.
+- **States:** every block has real loading skeletons, empty states that say what to do next, and in-place errors with Retry.
+- **Accessibility:** visible focus rings, labeled fields, a skip link, keyboard-reachable everything, and 4.5:1 text contrast in both themes.
+- **Forms never lose input:** a failed save keeps every field, and closing a form with edits asks first.
+
+The Taste inspector reports 0 failures on every screen. Editable designs (components, color variables, and the main screens in light and dark) live in a Figma file in the project owner's drafts.
+
+## Known limitations (as of Milestone 1)
+
+- No calendar, recurring classes, or conflict detection yet (Milestone 2).
+- Reminder preferences are saved but not delivered yet (Milestone 3). The form says so.
+- The "last course used" memory is per device (browser storage), not per account.
+- Registering with an email that already exists says so. This lets someone check whether an address has an account, a tradeoff accepted for clearer sign-up errors. Registration is rate limited per IP.
+- The assignment list returns at most 500 rows with no pagination. Performance with large datasets is measured in Milestone 4.
+- If the session expires while a form is open, saving shows a "sign in again" message and keeps the form, but signing in happens in a separate step.
+
+## Project layout
+
+```
+backend/
+  app/            FastAPI app: config, db, models, schemas, security, routers/
+  alembic/        migrations
+  scripts/        ensure_db.py
+  tests/          pytest suite (disposable PostgreSQL per run)
+frontend/
+  src/            React app: api.ts, pages/, components/, styles.css
+  e2e/            Playwright tests
+docs/screenshots/
+.github/workflows/ci.yml
+```

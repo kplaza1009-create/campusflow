@@ -46,6 +46,7 @@ def test_login_and_wrong_password(anon: Api, api: Api) -> None:
 
 def test_logout_invalidates_session_server_side(api: Api) -> None:
     cookie = api.client.cookies.get("cf_session")
+    assert cookie is not None
     assert api.post("/api/auth/logout").status_code == 204
     assert api.get("/api/courses").status_code == 401
     # Replaying the old cookie value doesn't work either: the session row is gone.
