@@ -134,7 +134,7 @@ Exactly one of `due_date` or `due_at` is set; a check constraint enforces it. Li
 | Database | PostgreSQL, SQLAlchemy, Alembic, psycopg | 16, 2.1, 1.20, 3.3 |
 | Validation | Pydantic, pydantic-settings | 2.14, 2.16 |
 | Passwords | argon2-cffi (Argon2id) | 25.1 |
-| Tests | pytest, Playwright | 9.1, 1.64 |
+| Tests | pytest, Playwright, axe-core (`@axe-core/playwright`) | 9.1, 1.64, 4.13 |
 | Tooling | uv, ruff, mypy (strict), oxlint, Prettier | 0.11, 0.17, 2.4, 1.x, 3.x |
 
 Exact versions are pinned in `backend/uv.lock` and `frontend/package-lock.json`. Node is pinned to 24 in `frontend/.nvmrc`. Node 24 is the newest LTS line today; Node 26 becomes Active LTS on October 27, 2026, and moving to it is a one-line change.
@@ -211,6 +211,8 @@ What the 83 backend tests cover (98% line coverage):
 Seven frontend unit tests cover the week grid's geometry: overnight events split across two days, overlapping events side by side, adjacent ones not, and the visible hour range.
 
 The Playwright test walks one student through the app: register, add a course, add an overdue assignment, trigger the duplicate warning and the discard prompt, add a weekly class and a clashing meeting on the calendar, save past the conflict warning and see both flagged in the agenda, search, complete, reload, sign out, and sign back in. A second test checks the wrong-password error.
+
+An automated accessibility scan ([`frontend/e2e/accessibility.spec.ts`](frontend/e2e/accessibility.spec.ts)) runs [axe-core](https://github.com/dequelabs/axe-core) against WCAG 2.2 AA on every page and dialog (sign-in and registration, Today, the week grid and agenda, assignments, courses, settings, the assignment dialog, and the event dialog showing a conflict warning) in light and dark mode, at desktop and phone widths: 44 scans per run. Any violation fails CI. Its first run found three real problems, all fixed: finished classes on Today were faded with opacity, which dropped their text below 4.5:1 contrast; deadline chips were smaller than the 24px minimum touch target; and the phone's "New" button had no clear name for screen readers. A scanner can't judge everything (whether a label makes sense, or whether a flow works by keyboard alone), so those still need a manual pass.
 
 ## Key decisions
 
@@ -296,7 +298,7 @@ The interface follows three design skills: Impeccable's rules for product UI, Em
 - **Color:** reserved for course identity, overdue status, and the single near-black primary action. Light and dark themes follow the OS.
 - **Motion:** feedback only: buttons press to 0.97 scale, dialogs enter in 180ms with a strong ease-out, and everything respects reduced-motion settings.
 - **States:** every block has real loading skeletons, empty states that say what to do next, and in-place errors with Retry.
-- **Accessibility:** visible focus rings, labeled fields, a skip link, keyboard-reachable everything, and 4.5:1 text contrast in both themes.
+- **Accessibility:** visible focus rings, labeled fields, a skip link, keyboard-reachable everything, 4.5:1 text contrast in both themes, and 24px minimum touch targets, checked automatically by axe on every push.
 - **Forms never lose input:** a failed save keeps every field, and closing a form with edits asks first.
 
 The week grid follows the same rules: course colors appear only as event tints and deadline dots, conflicts get a red edge and a warning icon (never color alone), and phones get the agenda, a list that works with screen readers, instead of a cramped grid.
@@ -309,6 +311,7 @@ The Taste inspector reports 0 failures on every screen. The main remaining warni
 - Only weekly repetition. A series can run at most one year, and a one-time event at most 14 days.
 - Events of archived courses are hidden from the calendar until the course is restored.
 - Phones show the week as an agenda list only; the grid needs a wider screen.
+- Accessibility is scanned automatically, but hasn't yet had a full manual pass with a screen reader (VoiceOver, NVDA).
 - Reminder preferences are saved but not delivered yet (Milestone 3). The form says so.
 - The "last course used" memory is per device (browser storage), not per account.
 - Registering with an email that already exists says so. This lets someone check whether an address has an account, a tradeoff accepted for clearer sign-up errors. Registration is rate limited per IP.
