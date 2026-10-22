@@ -245,6 +245,7 @@ function Schedule({ items, today }: { items: Occurrence[]; today: string }) {
               {o.start_date < today ? 'Until ' : `${formatTime(o.start_time)}–`}
               {formatTime(o.end_time)}
               {o.end_date > today && <span className="time-note">ends next day</span>}
+              {o.end < now && <span className="time-note">Ended</span>}
             </span>
             <span className="agenda-main">
               <span className="a-title">{o.title}</span>

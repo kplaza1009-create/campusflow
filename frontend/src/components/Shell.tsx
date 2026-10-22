@@ -69,7 +69,12 @@ function ShellLayout() {
           <Logo size={22} />
           CampusFlow
         </NavLink>
-        <button type="button" className="btn btn-primary btn-small" onClick={() => dialog.open()}>
+        <button
+          type="button"
+          className="btn btn-primary btn-small"
+          onClick={() => dialog.open()}
+          aria-label="New assignment" // the visible "New" alone is vague out of context
+        >
           <Plus size={16} aria-hidden="true" />
           New
         </button>
