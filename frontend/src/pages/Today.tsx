@@ -48,8 +48,8 @@ export function TodayPage() {
               </Link>
             }
           >
-            Start by adding the courses you&apos;re taking this term. Then add assignments to them, and this
-            page will show what&apos;s overdue, what&apos;s due today, and what&apos;s coming up this week.
+            Start by adding the courses you&apos;re taking this term. Then add assignments to them, and this page will
+            show what&apos;s overdue, what&apos;s due today, and what&apos;s coming up this week.
           </Empty>
         </section>
       ) : (
@@ -194,7 +194,6 @@ function WeekStrip({ data }: { data: ReturnType<typeof useToday>['data'] }) {
                 target?.scrollIntoView({ behavior: 'smooth', block: 'center' })
               }}
               disabled={due.length === 0}
-             
             >
               <span className="wd">
                 <span>{label}</span>

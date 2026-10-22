@@ -105,7 +105,12 @@ export function AssignmentsPage() {
               ['completed', 'Done'],
               ['all', 'All'],
             ].map(([value, label]) => (
-              <button key={value} type="button" aria-pressed={get('status') === value} onClick={() => update('status', value)}>
+              <button
+                key={value}
+                type="button"
+                aria-pressed={get('status') === value}
+                onClick={() => update('status', value)}
+              >
                 {label}
               </button>
             ))}
@@ -166,7 +171,12 @@ export function AssignmentsPage() {
           <label htmlFor={`${ids}-sort`} className="visually-hidden">
             Sort
           </label>
-          <select id={`${ids}-sort`} className="select" value={get('sort')} onChange={(e) => update('sort', e.target.value)}>
+          <select
+            id={`${ids}-sort`}
+            className="select"
+            value={get('sort')}
+            onChange={(e) => update('sort', e.target.value)}
+          >
             <option value="due_asc">Soonest deadline first</option>
             <option value="due_desc">Latest deadline first</option>
           </select>

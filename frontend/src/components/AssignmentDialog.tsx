@@ -4,7 +4,15 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useSta
 import { Link } from 'react-router'
 import { toast } from 'sonner'
 
-import { ApiError, api, REMINDER_OPTIONS, type Assignment, type AssignmentInput, type Course, type DuplicateWarning } from '../api'
+import {
+  ApiError,
+  api,
+  REMINDER_OPTIONS,
+  type Assignment,
+  type AssignmentInput,
+  type Course,
+  type DuplicateWarning,
+} from '../api'
 import { formatTime, relativeDay, todayIn } from '../dates'
 import { invalidateWork, useCourses } from '../queries'
 import { useUser } from '../session'
@@ -130,7 +138,12 @@ function AssignmentDialog({ editing, onClose }: { editing: Assignment | null; on
     >
       <div className="sheet-head">
         <h2 id={`${ids}-heading`}>{editing ? 'Edit assignment' : 'New assignment'}</h2>
-        <button type="button" className="btn btn-ghost btn-icon" onClick={() => requestClose.current()} aria-label="Close">
+        <button
+          type="button"
+          className="btn btn-ghost btn-icon"
+          onClick={() => requestClose.current()}
+          aria-label="Close"
+        >
           <X size={18} aria-hidden="true" />
         </button>
       </div>
@@ -275,209 +288,228 @@ function AssignmentForm({
   const titleId = `${ids}-title`
 
   return (
-          <form
-            className="form"
-            noValidate
-            onSubmit={(e) => {
-              e.preventDefault()
-              void save()
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                e.preventDefault()
-                void save()
-              }
-            }}
+    <form
+      className="form"
+      noValidate
+      onSubmit={(e) => {
+        e.preventDefault()
+        void save()
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+          e.preventDefault()
+          void save()
+        }
+      }}
+    >
+      <div className="field">
+        <label htmlFor={titleId}>Title</label>
+        <input
+          id={titleId}
+          ref={titleRef}
+          className="input"
+          required
+          maxLength={200}
+          value={form.title}
+          onChange={(e) => set('title', e.target.value)}
+          aria-invalid={!!fieldError('title')}
+          aria-describedby={fieldError('title') ? `${titleId}-err` : undefined}
+          placeholder="Problem set 4"
+          autoComplete="off"
+        />
+        {fieldError('title') && (
+          <span className="error" id={`${titleId}-err`}>
+            {fieldError('title')}
+          </span>
+        )}
+      </div>
+
+      <div className="row-2">
+        <div className="field">
+          <label htmlFor={`${ids}-course`}>Course</label>
+          <select
+            id={`${ids}-course`}
+            className="select"
+            value={form.course_id}
+            onChange={(e) => set('course_id', e.target.value)}
+            aria-invalid={!!fieldError('course_id')}
           >
-            <div className="field">
-              <label htmlFor={titleId}>Title</label>
-              <input
-                id={titleId}
-                ref={titleRef}
-                className="input"
-                required
-                maxLength={200}
-                value={form.title}
-                onChange={(e) => set('title', e.target.value)}
-                aria-invalid={!!fieldError('title')}
-                aria-describedby={fieldError('title') ? `${titleId}-err` : undefined}
-                placeholder="Problem set 4"
-                autoComplete="off"
-              />
-              {fieldError('title') && (
-                <span className="error" id={`${titleId}-err`}>
-                  {fieldError('title')}
-                </span>
-              )}
-            </div>
+            {editing?.course.archived && <option value={editing.course.id}>{editing.course.name} (archived)</option>}
+            {active.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.code ? `${c.code} · ${c.name}` : c.name}
+              </option>
+            ))}
+          </select>
+          {fieldError('course_id') && <span className="error">{fieldError('course_id')}</span>}
+        </div>
 
-            <div className="row-2">
-              <div className="field">
-                <label htmlFor={`${ids}-course`}>Course</label>
-                <select
-                  id={`${ids}-course`}
-                  className="select"
-                  value={form.course_id}
-                  onChange={(e) => set('course_id', e.target.value)}
-                  aria-invalid={!!fieldError('course_id')}
-                >
-                  {editing?.course.archived && (
-                    <option value={editing.course.id}>{editing.course.name} (archived)</option>
-                  )}
-                  {active.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.code ? `${c.code} · ${c.name}` : c.name}
-                    </option>
-                  ))}
-                </select>
-                {fieldError('course_id') && <span className="error">{fieldError('course_id')}</span>}
-              </div>
+        <div className="field">
+          <label htmlFor={`${ids}-date`}>Due date</label>
+          <input
+            id={`${ids}-date`}
+            type="date"
+            className="input"
+            required
+            value={form.due_date}
+            onChange={(e) => set('due_date', e.target.value)}
+            aria-invalid={!!fieldError('due_date')}
+          />
+          {fieldError('due_date') && <span className="error">{fieldError('due_date')}</span>}
+        </div>
+      </div>
 
-              <div className="field">
-                <label htmlFor={`${ids}-date`}>Due date</label>
-                <input
-                  id={`${ids}-date`}
-                  type="date"
-                  className="input"
-                  required
-                  value={form.due_date}
-                  onChange={(e) => set('due_date', e.target.value)}
-                  aria-invalid={!!fieldError('due_date')}
-                />
-                {fieldError('due_date') && <span className="error">{fieldError('due_date')}</span>}
-              </div>
-            </div>
+      <div className="field">
+        <label className="check-label">
+          <input type="checkbox" checked={form.has_time} onChange={(e) => set('has_time', e.target.checked)} />
+          Due at a specific time
+        </label>
+        {form.has_time ? (
+          <div className="row-2">
+            <input
+              type="time"
+              className="input"
+              aria-label="Due time"
+              value={form.due_time}
+              onChange={(e) => set('due_time', e.target.value)}
+              aria-invalid={!!fieldError('due_time')}
+            />
+            <span className="hint" style={{ alignSelf: 'center' }}>
+              {user.time_zone.replaceAll('_', ' ')} time
+            </span>
+          </div>
+        ) : (
+          <span className="hint">Without a time, it&apos;s due by the end of the day (11:59 PM).</span>
+        )}
+        {fieldError('due_time') && <span className="error">{fieldError('due_time')}</span>}
+      </div>
 
-            <div className="field">
-              <label className="check-label">
-                <input
-                  type="checkbox"
-                  checked={form.has_time}
-                  onChange={(e) => set('has_time', e.target.checked)}
-                />
-                Due at a specific time
-              </label>
-              {form.has_time ? (
-                <div className="row-2">
-                  <input
-                    type="time"
-                    className="input"
-                    aria-label="Due time"
-                    value={form.due_time}
-                    onChange={(e) => set('due_time', e.target.value)}
-                    aria-invalid={!!fieldError('due_time')}
-                  />
-                  <span className="hint" style={{ alignSelf: 'center' }}>
-                    {user.time_zone.replaceAll('_', ' ')} time
-                  </span>
-                </div>
-              ) : (
-                <span className="hint">Without a time, it&apos;s due by the end of the day (11:59 PM).</span>
-              )}
-              {fieldError('due_time') && <span className="error">{fieldError('due_time')}</span>}
-            </div>
+      <div className="field">
+        <label htmlFor={`${ids}-reminder`}>Reminder</label>
+        <select
+          id={`${ids}-reminder`}
+          className="select"
+          value={form.reminder}
+          onChange={(e) => set('reminder', e.target.value)}
+        >
+          {REMINDER_OPTIONS.map((o) => (
+            <option key={o.label} value={o.value === null ? '' : String(o.value)}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+        <span className="hint">Saved with the assignment. Reminder delivery arrives in the next release.</span>
+      </div>
 
-            <div className="field">
-              <label htmlFor={`${ids}-reminder`}>Reminder</label>
-              <select
-                id={`${ids}-reminder`}
-                className="select"
-                value={form.reminder}
-                onChange={(e) => set('reminder', e.target.value)}
-              >
-                {REMINDER_OPTIONS.map((o) => (
-                  <option key={o.label} value={o.value === null ? '' : String(o.value)}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-              <span className="hint">Saved with the assignment. Reminder delivery arrives in the next release.</span>
-            </div>
+      <div className="field">
+        <label htmlFor={`${ids}-notes`}>
+          Notes <span className="muted">(optional)</span>
+        </label>
+        <textarea
+          id={`${ids}-notes`}
+          className="textarea"
+          rows={2}
+          maxLength={5000}
+          value={form.description}
+          onChange={(e) => set('description', e.target.value)}
+          placeholder="Chapters, submission link, group members…"
+        />
+      </div>
 
-            <div className="field">
-              <label htmlFor={`${ids}-notes`}>
-                Notes <span className="muted">(optional)</span>
-              </label>
-              <textarea
-                id={`${ids}-notes`}
-                className="textarea"
-                rows={2}
-                maxLength={5000}
-                value={form.description}
-                onChange={(e) => set('description', e.target.value)}
-                placeholder="Chapters, submission link, group members…"
-              />
-            </div>
+      {duplicate && (
+        <div className="notice" role="alert">
+          <strong>This looks like one you already have.</strong>
+          <span>
+            {duplicate.matches
+              .map(
+                (m) =>
+                  `“${m.title}” in ${m.course.code ?? m.course.name}, due ${relativeDay(m.due_date, today)}${m.completed ? ' (done)' : ''}`,
+              )
+              .join('; ')}
+            .
+          </span>
+          <div className="notice-actions">
+            <button
+              type="button"
+              className="btn btn-secondary btn-small"
+              onClick={() => void save(true)}
+              disabled={saving}
+            >
+              Save anyway
+            </button>
+            <button type="button" className="btn btn-ghost btn-small" onClick={() => setDuplicate(null)}>
+              Keep editing
+            </button>
+          </div>
+        </div>
+      )}
 
-            {duplicate && (
-              <div className="notice" role="alert">
-                <strong>This looks like one you already have.</strong>
-                <span>
-                  {duplicate.matches
-                    .map(
-                      (m) =>
-                        `“${m.title}” in ${m.course.code ?? m.course.name}, due ${relativeDay(m.due_date, today)}${m.completed ? ' (done)' : ''}`,
-                    )
-                    .join('; ')}
-                  .
-                </span>
-                <div className="notice-actions">
-                  <button type="button" className="btn btn-secondary btn-small" onClick={() => void save(true)} disabled={saving}>
-                    Save anyway
-                  </button>
-                  <button type="button" className="btn btn-ghost btn-small" onClick={() => setDuplicate(null)}>
-                    Keep editing
-                  </button>
-                </div>
-              </div>
-            )}
+      {error && (
+        <div className="notice error" role="alert">
+          {Object.keys(error.fields).length > 0 ? 'Check the highlighted fields.' : errorMessage(error)}
+          {error.status !== 422 && <span>Your entries are still here. Try again when you&apos;re ready.</span>}
+        </div>
+      )}
 
-            {error && (
-              <div className="notice error" role="alert">
-                {Object.keys(error.fields).length > 0 ? 'Check the highlighted fields.' : errorMessage(error)}
-                {error.status !== 422 && <span>Your entries are still here. Try again when you&apos;re ready.</span>}
-              </div>
-            )}
-
-            {confirmDiscard ? (
-              <div className="notice" role="alert">
-                <strong>Discard your changes?</strong>
-                <div className="notice-actions">
-                  <button type="button" className="btn btn-secondary btn-small" onClick={() => setConfirmDiscard(false)} autoFocus>
-                    Keep editing
-                  </button>
-                  <button type="button" className="btn btn-danger btn-small" onClick={onClose}>
-                    Discard
-                  </button>
-                </div>
-              </div>
-            ) : confirmDelete ? (
-              <div className="notice error" role="alert">
-                <strong>Delete “{editing?.title}”? This can&apos;t be undone.</strong>
-                <div className="notice-actions">
-                  <button type="button" className="btn btn-secondary btn-small" onClick={() => setConfirmDelete(false)} autoFocus>
-                    Cancel
-                  </button>
-                  <button type="button" className="btn btn-danger-solid btn-small" onClick={() => void remove()} disabled={saving}>
-                    Delete assignment
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="form-actions">
-                {editing && (
-                  <button type="button" className="btn btn-ghost spacer" onClick={() => setConfirmDelete(true)} disabled={saving}>
-                    Delete
-                  </button>
-                )}
-                <button type="button" className="btn btn-secondary" onClick={requestClose} disabled={saving}>
-                  Cancel
-                </button>
-                <button type="submit" className="btn btn-primary" disabled={saving} aria-busy={saving}>
-                  {saving ? 'Saving…' : editing ? 'Save changes' : 'Add assignment'}
-                </button>
-              </div>
-            )}
-          </form>
+      {confirmDiscard ? (
+        <div className="notice" role="alert">
+          <strong>Discard your changes?</strong>
+          <div className="notice-actions">
+            <button
+              type="button"
+              className="btn btn-secondary btn-small"
+              onClick={() => setConfirmDiscard(false)}
+              autoFocus
+            >
+              Keep editing
+            </button>
+            <button type="button" className="btn btn-danger btn-small" onClick={onClose}>
+              Discard
+            </button>
+          </div>
+        </div>
+      ) : confirmDelete ? (
+        <div className="notice error" role="alert">
+          <strong>Delete “{editing?.title}”? This can&apos;t be undone.</strong>
+          <div className="notice-actions">
+            <button
+              type="button"
+              className="btn btn-secondary btn-small"
+              onClick={() => setConfirmDelete(false)}
+              autoFocus
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn btn-danger-solid btn-small"
+              onClick={() => void remove()}
+              disabled={saving}
+            >
+              Delete assignment
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="form-actions">
+          {editing && (
+            <button
+              type="button"
+              className="btn btn-ghost spacer"
+              onClick={() => setConfirmDelete(true)}
+              disabled={saving}
+            >
+              Delete
+            </button>
+          )}
+          <button type="button" className="btn btn-secondary" onClick={requestClose} disabled={saving}>
+            Cancel
+          </button>
+          <button type="submit" className="btn btn-primary" disabled={saving} aria-busy={saving}>
+            {saving ? 'Saving…' : editing ? 'Save changes' : 'Add assignment'}
+          </button>
+        </div>
+      )}
+    </form>
   )
 }

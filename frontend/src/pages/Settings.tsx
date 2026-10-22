@@ -47,7 +47,7 @@ const pretty = (zone: string) => zone.replaceAll('_', ' ')
 
 export function SettingsPage() {
   return (
-    <div className="page">
+    <div className="page narrow">
       <div className="title-row">
         <div>
           <h1>Settings</h1>
@@ -106,10 +106,7 @@ function TimeZoneSection() {
   }
 
   return (
-    <Section
-      title="Time zone"
-      about="Deadlines, today's date, and when work becomes overdue all follow this zone."
-    >
+    <Section title="Time zone" about="Deadlines, today's date, and when work becomes overdue all follow this zone.">
       <form className="form" onSubmit={save}>
         <div className="field">
           <label htmlFor={`${ids}-tz`}>Time zone</label>
@@ -150,7 +147,12 @@ function TimeZoneSection() {
         )}
         {changed && (
           <div className="form-actions">
-            <button type="button" className="btn btn-secondary" onClick={() => setZone(user.time_zone)} disabled={saving}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setZone(user.time_zone)}
+              disabled={saving}
+            >
               Cancel
             </button>
             <button type="submit" className="btn btn-primary" disabled={saving}>
@@ -271,10 +273,7 @@ function DeleteAccountSection() {
   const [error, setError] = useState<string | null>(null)
 
   return (
-    <Section
-      title="Delete account"
-      about="Permanently deletes your account and every course and assignment in it."
-    >
+    <Section title="Delete account" about="Permanently deletes your account and every course and assignment in it.">
       {!open ? (
         <button type="button" className="btn btn-danger" onClick={() => setOpen(true)}>
           Delete account…

@@ -30,8 +30,7 @@ export function AuthPage({ mode }: { mode: Mode }) {
     }
   }
 
-  const message =
-    error && (Object.keys(error.fields).length ? 'Check the highlighted fields.' : error.message)
+  const message = error && (Object.keys(error.fields).length ? 'Check the highlighted fields.' : error.message)
 
   return (
     <div className="auth">
@@ -122,7 +121,11 @@ export function AuthPage({ mode }: { mode: Mode }) {
             </p>
             <ul className="list">
               {SAMPLE.map((s) => (
-                <li key={s.title} className="a-row" style={{ gridTemplateColumns: 'minmax(0,1fr) auto', paddingLeft: 16 }}>
+                <li
+                  key={s.title}
+                  className="a-row"
+                  style={{ gridTemplateColumns: 'minmax(0,1fr) auto', paddingLeft: 16 }}
+                >
                   <span className="a-main" style={{ cursor: 'default' }}>
                     <span className="a-title">{s.title}</span>
                     <span className="a-meta">
@@ -145,7 +148,13 @@ export function AuthPage({ mode }: { mode: Mode }) {
 }
 
 const SAMPLE = [
-  { title: 'ER diagram for the library schema', course: 'CS248', color: '#2563eb', when: 'Yesterday', late: '1 day overdue' },
+  {
+    title: 'ER diagram for the library schema',
+    course: 'CS248',
+    color: '#2563eb',
+    when: 'Yesterday',
+    late: '1 day overdue',
+  },
   { title: 'Problem set 6', course: 'MTH 202', color: '#0d9488', when: 'Today, 11:59 PM', late: null },
   { title: 'Response paper: chapter 4', course: 'ENG 110', color: '#db2777', when: 'Thu', late: null },
 ]

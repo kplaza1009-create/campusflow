@@ -48,7 +48,12 @@ export function CoursesPage() {
             <div className="sub">{[c.code, c.instructor].filter(Boolean).join(' · ') || 'No code or instructor'}</div>
           </div>
           <span className="open num">{c.archived ? 'Archived' : `${c.open_assignments} open`}</span>
-          <button type="button" className="btn btn-ghost btn-small" onClick={() => setEditingId(c.id)} aria-label={`Edit ${c.name}`}>
+          <button
+            type="button"
+            className="btn btn-ghost btn-small"
+            onClick={() => setEditingId(c.id)}
+            aria-label={`Edit ${c.name}`}
+          >
             Edit
           </button>
         </div>
@@ -106,7 +111,9 @@ export function CoursesPage() {
             <ChevronRight size={16} aria-hidden="true" />
             Archived courses ({archived.length})
           </summary>
-          <p className="muted">Archived courses keep their assignments. They&apos;re hidden from Today, lists, and course pickers.</p>
+          <p className="muted">
+            Archived courses keep their assignments. They&apos;re hidden from Today, lists, and course pickers.
+          </p>
           <div className="panel">
             <ul className="list">{archived.map(row)}</ul>
           </div>
@@ -139,9 +146,7 @@ function CourseForm({ course, onDone, onDelete }: { course?: Course; onDone: () 
       if (course) {
         await api.updateCourse(course.id, { ...body, archived })
         if (archived !== course.archived) {
-          toast.success(
-            archived ? `Archived ${course.name}. Its assignments are kept.` : `Restored ${course.name}.`,
-          )
+          toast.success(archived ? `Archived ${course.name}. Its assignments are kept.` : `Restored ${course.name}.`)
         } else toast.success('Course saved')
       } else {
         const created = await api.createCourse(body, idempotencyKey)
@@ -241,7 +246,12 @@ function CourseForm({ course, onDone, onDelete }: { course?: Course; onDone: () 
       <div className="form-actions">
         {course && (
           <span className="spacer" style={{ display: 'flex', gap: 8 }}>
-            <button type="button" className="btn btn-secondary btn-small" onClick={() => void save(!course.archived)} disabled={saving}>
+            <button
+              type="button"
+              className="btn btn-secondary btn-small"
+              onClick={() => void save(!course.archived)}
+              disabled={saving}
+            >
               {course.archived ? 'Restore' : 'Archive'}
             </button>
             <button type="button" className="btn btn-danger btn-small" onClick={onDelete} disabled={saving}>
@@ -343,12 +353,12 @@ function DeleteCourseDialog({ course, onClose }: { course: Course; onClose: () =
               ) : null}
               . This can&apos;t be undone.
             </p>
-            {!course.archived && (
-              <p className="muted">To keep the work but hide the course, archive it instead.</p>
-            )}
+            {!course.archived && <p className="muted">To keep the work but hide the course, archive it instead.</p>}
             <label className="check-label">
               <input type="checkbox" checked={understood} onChange={(e) => setUnderstood(e.target.checked)} />
-              {impact > 0 ? `Yes, delete the course and its ${plural(impact, 'assignment')}` : 'Yes, delete this course'}
+              {impact > 0
+                ? `Yes, delete the course and its ${plural(impact, 'assignment')}`
+                : 'Yes, delete this course'}
             </label>
           </>
         )}
