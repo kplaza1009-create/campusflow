@@ -1,8 +1,8 @@
 # CampusFlow
 
-A college planner for keeping every course, class, and deadline in one place: what's overdue, what's due today, where you need to be this week, and which plans clash, all in your own time zone.
+A college planner for keeping every course, class, and deadline in one place: what's overdue, what's due today, where you need to be this week, and which plans clash, all in your own time zone, with reminders that arrive before work is due.
 
-Built as a full-stack portfolio project: a React + TypeScript frontend, a FastAPI backend, PostgreSQL, and (in a later milestone) a separate worker for durable reminders.
+Built as a full-stack portfolio project: a React + TypeScript frontend, a FastAPI backend, PostgreSQL, and a separate worker process that delivers durable reminders.
 
 ![Today view](docs/screenshots/today-light.png)
 
@@ -12,7 +12,7 @@ Built as a full-stack portfolio project: a React + TypeScript frontend, a FastAP
 | --- | --- | --- |
 | 1 | Accounts, courses, assignments, persistent storage | **Done** |
 | 2 | Weekly calendar, recurring classes, conflict detection | **Done** |
-| 3 | Durable reminders and notification settings | Not started |
+| 3 | Durable reminders and notification settings | **Done** |
 | 4 | Demo account, deployment, usability, portfolio docs | Not started |
 
 ## The problem
@@ -24,7 +24,8 @@ Students juggle deadlines from four to six courses, each with its own syllabus, 
 3. **Find and filter:** search assignments, filter by course, status, overdue, or date range, and sort by deadline.
 4. **Finish:** check an assignment off. It's saved before it's shown as done, and it can be undone.
 5. **Plan the week:** see classes, meetings, and deadlines on one week grid, and get warned before booking two things at once.
-6. **End the semester:** archive a course to keep its history without cluttering the lists.
+6. **Get reminded:** each assignment's reminder arrives in Notifications, and by email if you opt in, even if nobody has the app open.
+7. **End the semester:** archive a course to keep its history without cluttering the lists.
 
 ## Screenshots
 
@@ -34,10 +35,11 @@ Students juggle deadlines from four to six courses, each with its own syllabus, 
 | ![Conflict warning](docs/screenshots/event-conflict-light.png) | ![Editing a weekly class](docs/screenshots/class-dialog-light.png) |
 | ![Assignments](docs/screenshots/assignments-light.png) | ![New assignment](docs/screenshots/dialog-light.png) |
 | ![Courses](docs/screenshots/courses-light.png) | ![Settings](docs/screenshots/settings-light.png) |
+| ![Notifications](docs/screenshots/notifications-light.png) | ![Reminder history in the edit dialog](docs/screenshots/reminder-history-light.png) |
 | ![Week in dark mode](docs/screenshots/week-dark.png) | ![Today in dark mode](docs/screenshots/today-dark.png) |
 | ![Sign in](docs/screenshots/login.png) | |
 
-<img src="docs/screenshots/today-phone.png" alt="Today on a phone" width="300"> <img src="docs/screenshots/agenda-phone.png" alt="The week as an agenda on a phone" width="300">
+<img src="docs/screenshots/today-phone.png" alt="Today on a phone" width="300"> <img src="docs/screenshots/agenda-phone.png" alt="The week as an agenda on a phone" width="300"> <img src="docs/screenshots/notifications-phone.png" alt="Notifications on a phone" width="300">
 
 ## Architecture
 
@@ -45,10 +47,13 @@ Students juggle deadlines from four to six courses, each with its own syllabus, 
 flowchart LR
   B[Browser<br/>React + TypeScript] -- "/api/* (same origin in dev via Vite proxy)<br/>cookie + X-CSRF-Token" --> A[FastAPI API<br/>sync route handlers]
   A -- SQLAlchemy 2.x<br/>psycopg 3 --> D[(PostgreSQL 16)]
-  W[Reminder worker<br/>Milestone 3] -. polls queue .-> D
+  W[Reminder worker<br/>python -m app.worker] -- "claims due jobs<br/>FOR UPDATE SKIP LOCKED" --> D
+  W -- "HTTPS + Idempotency-Key<br/>(or local capture file)" --> R[Resend]
 ```
 
-One frontend, one API, one database, plus one worker in Milestone 3. Nothing else is needed yet.
+One frontend, one API, one database, and one worker. The reminder queue is a PostgreSQL table, so there's no message broker to run.
+
+**How a reminder flows:** saving an assignment (or completing it, archiving its course, changing your time zone or email setting) recalculates its reminder rows in the same transaction. The worker, a separate process, polls for rows whose time has come, claims them, rechecks the assignment, then writes an in-app notification or calls the email adapter, and records what happened. The browser polls Notifications once a minute.
 
 **How a request flows:** the browser calls `/api/...` with the session cookie. FastAPI loads the session (dependency `require_auth`), checks the CSRF header on writes, and runs the handler in its threadpool. The handler reads or writes with SQLAlchemy, filtering every query by the signed-in user's ID, then commits. Pydantic validates the input on the way in and shapes the output on the way out. The frontend caches responses with TanStack Query and refetches the affected views after every write.
 
@@ -62,11 +67,15 @@ erDiagram
   courses ||--o{ assignments : "contains (same user)"
   users ||--o{ events : owns
   courses |o--o{ events : "optionally linked (same user)"
+  assignments ||--o{ reminders : "scheduled for (same user)"
+  users ||--o{ notifications : receives
+  reminders |o--o| notifications : "delivered as"
   users {
     bigint id PK
     varchar email "unique, lowercase"
     varchar password_hash "argon2id"
     varchar time_zone "IANA, e.g. America/New_York"
+    bool email_reminders "opt-in"
   }
   sessions {
     bigint id PK
@@ -113,6 +122,30 @@ erDiagram
     date last_date "weekly only"
     uuid idempotency_key "unique per user"
   }
+  reminders {
+    bigint id PK
+    bigint assignment_id FK "composite FK (user_id, assignment_id)"
+    varchar channel "in_app or email"
+    timestamptz deadline_at "rechecked before delivery"
+    int lead_minutes
+    timestamptz send_at
+    varchar status "pending, processing, captured, accepted, delivered, skipped, cancelled, failed"
+    smallint attempts
+    timestamptz next_attempt_at "backoff"
+    timestamptz locked_until "worker lease"
+    varchar detail "why skipped or failed"
+    varchar provider_message_id
+    varchar provider_status "Resend last_event"
+  }
+  notifications {
+    bigint id PK
+    bigint user_id FK
+    bigint assignment_id FK "null after the assignment is deleted"
+    bigint reminder_id FK "unique: one notification per reminder"
+    varchar title
+    varchar body
+    timestamptz read_at
+  }
   rate_limit_events {
     bigint id PK
     varchar bucket "e.g. login:email:..."
@@ -155,7 +188,12 @@ uv run python -m scripts.ensure_db               # creates the database if missi
 uv run alembic upgrade head                      # applies migrations
 uv run uvicorn app.main:app --reload --port 8000
 
-# 3. Frontend (another terminal)
+# 3. Reminder worker (another terminal). Email is captured to backend/.captured-email/ by default.
+cd backend
+uv run python -m app.worker                      # add --once to process what's due and exit
+# After upgrading an existing database to this version, run once:  uv run python -m app.worker --resync
+
+# 4. Frontend (another terminal)
 cd frontend
 npm ci
 npm run dev                                      # http://localhost:5173
@@ -175,6 +213,11 @@ All backend settings use the `CAMPUSFLOW_` prefix. See [`backend/.env.example`](
 | `CAMPUSFLOW_SESSION_COOKIE_NAME` | `cf_session` | Use `__Host-cf_session` in production |
 | `CAMPUSFLOW_SESSION_IDLE_DAYS` / `_ABSOLUTE_DAYS` | 7 / 30 | Sliding and absolute session lifetimes |
 | `CAMPUSFLOW_LOGIN_MAX_FAILURES_PER_EMAIL` | 5 per 15 min | Also a per-IP limit (30) |
+| `CAMPUSFLOW_EMAIL_MODE` | `capture` | `capture` writes emails to a local file and sends nothing; `resend` sends |
+| `CAMPUSFLOW_RESEND_API_KEY` | none | Secret. Only needed with `EMAIL_MODE=resend` |
+| `CAMPUSFLOW_EMAIL_FROM` | `CampusFlow <onboarding@resend.dev>` | Resend's test sender works without a domain |
+| `CAMPUSFLOW_EMAIL_ALLOWED_RECIPIENTS` | empty (anyone) | JSON list. If set, email only goes to these addresses; others stay in-app |
+| `CAMPUSFLOW_REMINDER_MAX_ATTEMPTS` / `_LEASE_MINUTES` | 5 / 5 | Retry limit, and how long a claimed job waits before another worker may take it |
 
 No secrets are committed. `.env` files are git-ignored.
 
@@ -198,7 +241,7 @@ npm run test:e2e
 
 GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs all three jobs on every push and pull request, with a PostgreSQL 16 service container.
 
-What the 83 backend tests cover (98% line coverage):
+What the 123 backend tests cover (97% line coverage):
 
 - **Auth:** HTTP-only cookie, email normalization, generic login errors, server-side logout (a replayed cookie fails), idle and absolute expiry, CSRF header required for writes, cross-origin writes rejected, login throttling that survives across clients, password change signing out other devices, account deletion.
 - **Isolation:** another user's records return 404 by ID for read, edit, complete, delete, archive, and deletion-impact. An assignment can't be attached to another user's course, and the database itself rejects such a row. Idempotency keys are scoped per user.
@@ -206,13 +249,14 @@ What the 83 backend tests cover (98% line coverage):
 - **Courses:** validation, idempotent create, archive keeps data, and delete requires the confirmed count and cascades in one transaction.
 - **Time:** spring-forward gaps, fall-back overlaps, overdue exactly after 11:59 PM local, time zone changes, and "today" computed in the user's zone rather than UTC.
 - **Scheduling rules (pure functions, no database):** adjacent events don't conflict, a one-minute overlap does, overnight events clash with the next morning, weekly expansion stays inside both the window and the series dates, classes keep their local time through daylight saving, a class start in the spring-forward gap moves forward, a repeated fall-back time uses the first one, and a class defined in another zone keeps that zone's wall time.
+- **Reminders (40 tests):** when reminders fire (9:00 AM for day-based leads on date-only deadlines, counting back from midnight for hour-based ones, immediately if the time has passed but the deadline hasn't); rescheduling on edit, completion, reopening, archiving, time zone changes, and email opt-in; four concurrent resyncs leaving exactly one pending reminder; three concurrent workers claiming 30 jobs with no job claimed twice; a crashed worker's job reclaimed after its lease, with the late worker unable to deliver it again; a job that keeps crashing its worker failing after 5 attempts; backoff of 1 then 4 minutes with a stable idempotency key across retries; permanent errors failing without retries; the outage policy; rechecking a reminder completed or rescheduled after it was claimed; provider confirmation moving `accepted` to `delivered` or `failed`; capture mode; the recipient allowlist; Resend request shape and error classification (with simulated HTTP); log masking; isolation between users; and the worker's command line.
 - **Calendar API:** validation (end after start, unique weekdays, series at most a year), conflict warnings for one-time and recurring events with **Save anyway**, deadlines that never block time, overnight events, editing a whole series, idempotent create, bounded windows, archived courses' events hidden and ignored for conflicts, events on Today, deleting a course with its events, and isolation between users.
 
 Seven frontend unit tests cover the week grid's geometry: overnight events split across two days, overlapping events side by side, adjacent ones not, and the visible hour range.
 
-The Playwright test walks one student through the app: register, add a course, add an overdue assignment, trigger the duplicate warning and the discard prompt, add a weekly class and a clashing meeting on the calendar, save past the conflict warning and see both flagged in the agenda, search, complete, reload, sign out, and sign back in. A second test checks the wrong-password error.
+The Playwright test walks one student through the app: register, add a course, add an overdue assignment, trigger the duplicate warning and the discard prompt, add a weekly class and a clashing meeting on the calendar, save past the conflict warning and see both flagged in the agenda, search, complete, reload, sign out, and sign back in. A second test checks the wrong-password error. A third runs the whole reminder path: it creates an assignment whose reminder is due, runs the real worker process against the test database, finds the reminder in Notifications, opens it to see its delivery history, and checks that a second worker run delivers nothing twice.
 
-An automated accessibility scan ([`frontend/e2e/accessibility.spec.ts`](frontend/e2e/accessibility.spec.ts)) runs [axe-core](https://github.com/dequelabs/axe-core) against WCAG 2.2 AA on every page and dialog (sign-in and registration, Today, the week grid and agenda, assignments, courses, settings, the assignment dialog, and the event dialog showing a conflict warning) in light and dark mode, at desktop and phone widths: 44 scans per run. Any violation fails CI. Its first run found three real problems, all fixed: finished classes on Today were faded with opacity, which dropped their text below 4.5:1 contrast; deadline chips were smaller than the 24px minimum touch target; and the phone's "New" button had no clear name for screen readers. A scanner can't judge everything (whether a label makes sense, or whether a flow works by keyboard alone), so those still need a manual pass.
+An automated accessibility scan ([`frontend/e2e/accessibility.spec.ts`](frontend/e2e/accessibility.spec.ts)) runs [axe-core](https://github.com/dequelabs/axe-core) against WCAG 2.2 AA on every page and dialog (sign-in and registration, Today, the week grid and agenda, assignments, courses, notifications, settings, the assignment dialog, and the event dialog showing a conflict warning) in light and dark mode, at desktop and phone widths: 48 scans per run. Any violation fails CI. Its first run found three real problems, all fixed: finished classes on Today were faded with opacity, which dropped their text below 4.5:1 contrast; deadline chips were smaller than the 24px minimum touch target; and the phone's "New" button had no clear name for screen readers. A scanner can't judge everything (whether a label makes sense, or whether a flow works by keyboard alone), so those still need a manual pass.
 
 ## Key decisions
 
@@ -290,6 +334,46 @@ Time zones for events:
 - **Skipped times move forward for classes.** If a weekly class starts at 2:30 AM, the meeting on March 8, 2026 (when New York skips from 2:00 to 3:00) happens at 3:30 AM. For a single event, a time that doesn't exist is rejected with an explanation instead, since there's no series to keep consistent.
 - **Repeated times use the first one.** On November 1, 2026, 1:30 AM happens twice; CampusFlow uses the first (EDT) and says so after saving a one-time event.
 
+### Durable reminders
+
+**The queue is a PostgreSQL table.** Each `reminders` row is one reminder on one channel (in-app or email) and is also the job the worker processes. A broker such as Redis or RabbitMQ would be one more service to run, secure, and back up, and wouldn't remove the need to keep scheduling state in the database. At this scale (a few jobs per student per week) PostgreSQL's row locks are enough. The tradeoff: workers poll (every 30 seconds by default) instead of being pushed work, so a reminder can arrive up to one poll interval late.
+
+**Scheduling stays in sync with the data.** Every change that could affect a reminder (creating, editing, completing, reopening, deleting, archiving a course, changing time zone or email opt-in) recalculates that assignment's pending reminders in the same transaction, so the queue can't disagree with the assignment. The assignment row is locked first, so two simultaneous edits can't both add a reminder; a partial unique index enforces at most one pending reminder per assignment and channel.
+
+**When a reminder fires:**
+
+| Deadline | Reminder | Fires |
+| --- | --- | --- |
+| Fri 5:00 PM (exact time) | 3 hours before | Fri 2:00 PM |
+| Friday (date only) | 1 day before | Thu 9:00 AM, your time |
+| Friday (date only) | 1 hour before | Fri 11:00 PM (an hour before it becomes overdue) |
+| Due tomorrow | 1 week before | As soon as it's saved, since the time has passed but the deadline hasn't |
+
+Date-only reminders follow your current time zone, like the overdue rule, so changing zones reschedules them. Exact-time reminders keep their instant.
+
+**How the worker processes a job:**
+
+1. **Claim.** One short transaction selects due rows with `FOR UPDATE SKIP LOCKED`, marks them `processing`, stamps a lease (`locked_until`, 5 minutes) and the worker's id, and counts the attempt. Concurrent workers skip rows another worker has locked, so no job is claimed twice.
+2. **Recheck.** The worker reloads the assignment and skips the reminder if it was completed, deleted, or archived, if it was rescheduled since (a newer reminder replaces it), or if the deadline has already passed.
+3. **Deliver, outside any transaction.** In-app: insert the notification (unique per reminder, so a repeat is a no-op) in the same transaction that marks the job delivered. Email: call the adapter with `Idempotency-Key: campusflow-reminder-<id>`.
+4. **Record**, but only if this worker still holds the lease. If another worker took over, the result is discarded (and an in-app write rolled back).
+
+**Retries.** Rate limits, 5xx responses, and network errors are retried after 1, 4, 16, and 64 minutes (plus up to 20% jitter), up to 5 attempts. Errors that retrying can't fix, such as an invalid API key or Resend's test-mode recipient restriction, fail immediately with the provider's message.
+
+**Crash recovery.** If a worker dies mid-job, the lease expires and another worker reclaims the job. Each claim counts as an attempt, so a job that crashes every worker that touches it fails after 5 attempts instead of looping.
+
+**Outage policy.** After downtime, reminders whose time has passed are still sent if their deadline hasn't passed. Once the deadline has passed, the reminder is skipped and recorded as missed: a late "due soon" message would be wrong, and the assignment already shows as overdue.
+
+**Honest statuses.** `captured` means saved to a local file and never sent. `accepted` means Resend took the message, which isn't proof of delivery. `delivered` requires evidence: the in-app notification exists, or Resend reports `delivered` when the worker asks for the message's last event. Bounces and complaints move the job to `failed`. The edit dialog shows these in plain words.
+
+**Logs** record job ids, outcomes, and masked addresses (`a***@example.edu`); the API key never appears in logs or stored errors.
+
+**Remaining risks:**
+
+- If a worker stalls past its lease *while* Resend is processing its request, a second worker may send the same email. Resend's idempotency key drops the duplicate if it arrives within 24 hours.
+- If the assignment changes in the moment between the recheck and the send, one stale email can go out. The new reminder is still scheduled correctly.
+- Email reminders only reach the account owner until a domain is verified in Resend; others' email reminders fail with the provider's explanation, or are skipped by the allowlist. In-app reminders are unaffected.
+
 ## Design
 
 The interface follows three design skills: Impeccable's rules for product UI, Emil Kowalski's design-engineering and motion guidance, and the Taste skill's app-screen study. Concretely:
@@ -305,14 +389,18 @@ The week grid follows the same rules: course colors appear only as event tints a
 
 The Taste inspector reports 0 failures on every screen. The main remaining warning is deliberate: calendar axis labels and event details use 12px text, because a week of classes has to fit on one screen. Editable designs (components, color variables, and the main screens in light and dark, including the week grid, the calendar event component, and the conflict dialog) live in a Figma file in the project owner's drafts.
 
-## Known limitations (as of Milestone 2)
+## Known limitations (as of Milestone 3)
 
 - Editing a weekly class changes every meeting, past and future. Skipping or moving a single meeting (a holiday, a moved lab) isn't supported yet.
 - Only weekly repetition. A series can run at most one year, and a one-time event at most 14 days.
 - Events of archived courses are hidden from the calendar until the course is restored.
 - Phones show the week as an agenda list only; the grid needs a wider screen.
 - Accessibility is scanned automatically, but hasn't yet had a full manual pass with a screen reader (VoiceOver, NVDA).
-- Reminder preferences are saved but not delivered yet (Milestone 3). The form says so.
+- Real email delivery through Resend hasn't been exercised yet: the development environment can't reach `api.resend.com`, so the adapter is tested against simulated responses. It gets its first real send after deployment (Milestone 4).
+- One reminder per assignment, at fixed choices (1 hour to 1 week before). Emails are plain text.
+- Notifications refresh once a minute in the browser rather than being pushed.
+- Delivery confirmation is checked for 3 days after sending; later bounces aren't recorded.
+- If Resend's daily quota is used up, retries run out before the quota resets at midnight UTC, and the email is marked failed.
 - The "last course used" memory is per device (browser storage), not per account.
 - Registering with an email that already exists says so. This lets someone check whether an address has an account, a tradeoff accepted for clearer sign-up errors. Registration is rate limited per IP.
 - The assignment list returns at most 500 rows with no pagination. Performance with large datasets is measured in Milestone 4.
@@ -324,6 +412,8 @@ The Taste inspector reports 0 failures on every screen. The main remaining warni
 backend/
   app/            FastAPI app: config, db, models, schemas, security, routers/
                   scheduling.py (pure recurrence and overlap rules), calendar.py (loading and shaping)
+                  reminders.py (when reminders fire, keeping them in sync), worker.py (the worker process),
+                  email.py (capture and Resend adapters)
   alembic/        migrations
   scripts/        ensure_db.py
   tests/          pytest suite (disposable PostgreSQL per run)
