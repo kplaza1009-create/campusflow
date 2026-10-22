@@ -11,6 +11,7 @@ from uuid import UUID
 from sqlalchemy import (
     ARRAY,
     BigInteger,
+    Boolean,
     CheckConstraint,
     Date,
     DateTime,
@@ -41,6 +42,8 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(254))
     password_hash: Mapped[str] = mapped_column(String(255))
     time_zone: Mapped[str] = mapped_column(String(64))
+    # Reminders always appear in CampusFlow; email is opt-in.
+    email_reminders: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     created_at: Mapped[datetime] = mapped_column(TZ, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(TZ, server_default=func.now(), onupdate=func.now())
 
@@ -138,6 +141,8 @@ class Assignment(Base):
         CheckConstraint("(due_date IS NULL) <> (due_at IS NULL)", name="ck_assignments_one_due"),
         CheckConstraint("length(btrim(title)) > 0", name="ck_assignments_title_nonempty"),
         UniqueConstraint("user_id", "idempotency_key", name="uq_assignments_idempotency"),
+        # Target of the composite foreign key from reminders.
+        UniqueConstraint("user_id", "id", name="uq_assignments_user_id_id"),
         Index("ix_assignments_user_due_date", "user_id", "due_date"),
         Index("ix_assignments_user_due_at", "user_id", "due_at"),
         # Supports the likely-duplicate check, per-course queries, and the cascade from
@@ -222,4 +227,98 @@ class Event(Base):
         Index("ix_events_user_starts_at", "user_id", "starts_at"),
         Index("ix_events_user_series", "user_id", "first_date", "last_date"),
         Index("ix_events_user_course", "user_id", "course_id"),
+    )
+
+
+REMINDER_CHANNELS = ("in_app", "email")
+# pending -> processing -> one final state. "captured" (saved locally, never sent),
+# "accepted" (the provider took it; delivery unconfirmed), and "delivered" (confirmed:
+# the in-app notification exists, or the provider reported delivery) stay distinct.
+REMINDER_STATUSES = (
+    "pending",
+    "processing",
+    "captured",
+    "accepted",
+    "delivered",
+    "skipped",
+    "cancelled",
+    "failed",
+)
+
+
+class Reminder(Base):
+    """One scheduled reminder for one channel: the durable job the worker processes.
+
+    The row is the queue entry and its history. Workers claim due rows with
+    FOR UPDATE SKIP LOCKED and hold a lease (locked_until); if a worker dies, the
+    lease runs out and another worker reclaims the job.
+    """
+
+    __tablename__ = "reminders"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    assignment_id: Mapped[int] = mapped_column(BigInteger)
+    channel: Mapped[str] = mapped_column(String(8))
+    # What it was scheduled for, rechecked against the assignment before delivery.
+    deadline_at: Mapped[datetime] = mapped_column(TZ)
+    lead_minutes: Mapped[int] = mapped_column(Integer)
+    send_at: Mapped[datetime] = mapped_column(TZ)
+    status: Mapped[str] = mapped_column(String(12), server_default=text("'pending'"))
+    attempts: Mapped[int] = mapped_column(SmallInteger, server_default=text("0"))
+    next_attempt_at: Mapped[datetime] = mapped_column(TZ)
+    locked_until: Mapped[datetime | None] = mapped_column(TZ)
+    worker_id: Mapped[str | None] = mapped_column(String(80))
+    detail: Mapped[str | None] = mapped_column(String(300))  # why it was skipped / failed
+    provider_message_id: Mapped[str | None] = mapped_column(String(100))
+    provider_status: Mapped[str | None] = mapped_column(String(32))  # e.g. Resend's last_event
+    provider_checked_at: Mapped[datetime | None] = mapped_column(TZ)
+    finished_at: Mapped[datetime | None] = mapped_column(TZ)
+    created_at: Mapped[datetime] = mapped_column(TZ, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(TZ, server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["user_id", "assignment_id"],
+            ["assignments.user_id", "assignments.id"],
+            ondelete="CASCADE",
+            name="fk_reminders_assignment_same_user",
+        ),
+        CheckConstraint(f"channel IN {REMINDER_CHANNELS}", name="ck_reminders_channel"),
+        CheckConstraint(f"status IN {REMINDER_STATUSES}", name="ck_reminders_status"),
+        # At most one waiting reminder per assignment and channel.
+        Index(
+            "uq_reminders_one_pending",
+            "assignment_id",
+            "channel",
+            unique=True,
+            postgresql_where=text("status = 'pending'"),
+        ),
+        # The worker's two claim paths: due pending jobs, and expired leases.
+        Index("ix_reminders_due", "next_attempt_at", postgresql_where=text("status = 'pending'")),
+        Index("ix_reminders_leases", "locked_until", postgresql_where=text("status = 'processing'")),
+        Index("ix_reminders_user_assignment", "user_id", "assignment_id"),
+    )
+
+
+class Notification(Base):
+    """A persistent in-app notification. Keeps its own text, so it survives the assignment."""
+
+    __tablename__ = "notifications"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    assignment_id: Mapped[int | None] = mapped_column(ForeignKey("assignments.id", ondelete="SET NULL"))
+    # Unique, so a retried or reclaimed job can't create a second notification.
+    reminder_id: Mapped[int | None] = mapped_column(
+        ForeignKey("reminders.id", ondelete="SET NULL"), unique=True
+    )
+    title: Mapped[str] = mapped_column(String(200))
+    body: Mapped[str] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(TZ, server_default=func.now())
+    read_at: Mapped[datetime | None] = mapped_column(TZ)
+
+    __table_args__ = (
+        Index("ix_notifications_user_created", "user_id", "created_at"),
+        Index("ix_notifications_user_unread", "user_id", postgresql_where=text("read_at IS NULL")),
     )
