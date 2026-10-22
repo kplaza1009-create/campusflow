@@ -49,7 +49,7 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     _admin.dispose()
 
 
-TABLES = "rate_limit_events, sessions, assignments, courses, users"
+TABLES = "rate_limit_events, sessions, events, assignments, courses, users"
 
 
 @pytest.fixture(autouse=True)

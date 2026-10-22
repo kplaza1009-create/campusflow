@@ -48,7 +48,7 @@ def test_delete_requires_matching_confirmed_count(api: Api) -> None:
     kept = api.assignment(keep["id"], "Unrelated")
 
     impact = api.get(f"/api/courses/{course['id']}/deletion-impact").json()
-    assert impact == {"assignments": 2}
+    assert impact == {"assignments": 2, "events": 0}
 
     # Confirmation is required, and a stale count (data changed since the user
     # confirmed) is refused instead of deleting more than they agreed to.

@@ -3,7 +3,15 @@
 from datetime import date, datetime, time
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, StringConstraints, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    EmailStr,
+    Field,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
 
 from app.timeutil import is_valid_zone
 
@@ -120,6 +128,7 @@ class CourseOut(BaseModel):
 
 class DeletionImpact(BaseModel):
     assignments: int
+    events: int = 0
 
 
 # --- Assignments ----------------------------------------------------------------
@@ -205,9 +214,126 @@ class DuplicateWarning(BaseModel):
     matches: list[AssignmentOut]
 
 
+# --- Calendar events ----------------------------------------------------------------
+
+EventKind = Literal["class", "study", "meeting", "other"]
+MAX_SERIES_DAYS = 366  # a weekly class runs for at most about a year (a term is ~15 weeks)
+MAX_EVENT_DAYS = 14  # a one-time event can span at most two weeks
+
+
+class OneTimeSchedule(BaseModel):
+    """Local dates and wall-clock times in the user's time zone."""
+
+    type: Literal["once"] = "once"
+    start_date: date
+    start_time: time
+    end_date: date
+    end_time: time
+
+    @field_validator("start_time", "end_time")
+    @classmethod
+    def _minutes(cls, v: time) -> time:
+        return v.replace(second=0, microsecond=0)
+
+
+class WeeklySchedule(BaseModel):
+    """A class that meets on the same weekdays and local times, between two dates."""
+
+    type: Literal["weekly"] = "weekly"
+    weekdays: list[Annotated[int, Field(ge=0, le=6)]] = Field(min_length=1, max_length=7)  # 0 = Monday
+    start_time: time
+    end_time: time  # earlier than start_time means the class ends the next day
+    first_date: date
+    last_date: date
+
+    @field_validator("weekdays")
+    @classmethod
+    def _unique(cls, v: list[int]) -> list[int]:
+        return sorted(set(v))
+
+    @field_validator("start_time", "end_time")
+    @classmethod
+    def _minutes(cls, v: time) -> time:
+        return v.replace(second=0, microsecond=0)
+
+    @model_validator(mode="after")
+    def _check(self) -> "WeeklySchedule":
+        if self.end_time == self.start_time:
+            raise ValueError("A class can't start and end at the same time.")
+        if self.last_date < self.first_date:
+            raise ValueError("The last class must be on or after the first.")
+        if (self.last_date - self.first_date).days > MAX_SERIES_DAYS:
+            raise ValueError("A weekly class can run for at most a year.")
+        return self
+
+
+class EventFields(BaseModel):
+    title: Annotated[Str, StringConstraints(min_length=1, max_length=200)]
+    kind: EventKind = "other"
+    course_id: int | None = None
+    location: Annotated[Str, StringConstraints(max_length=200)] | None = None
+    schedule: Annotated[OneTimeSchedule | WeeklySchedule, Field(discriminator="type")]
+    # Set after the user has seen the conflict warning and chooses to save anyway.
+    allow_conflicts: bool = False
+
+    @field_validator("location")
+    @classmethod
+    def _blank_to_none(cls, v: str | None) -> str | None:
+        return v or None
+
+
+class EventOut(BaseModel):
+    id: int
+    title: str
+    kind: EventKind
+    course: CourseBrief | None
+    location: str | None
+    recurring: bool
+    # For one-time events: local dates/times in the user's current zone.
+    # For weekly classes: the class's own rule, in the class's own time zone.
+    schedule: OneTimeSchedule | WeeklySchedule
+    time_zone: str
+    ends_next_day: bool = False
+    time_note: Literal["ambiguous_earlier"] | None = None
+
+
+class OccurrenceOut(BaseModel):
+    """One meeting of an event, shown in the user's current time zone."""
+
+    event_id: int
+    title: str
+    kind: EventKind
+    course: CourseBrief | None
+    location: str | None
+    recurring: bool
+    start: datetime  # UTC
+    end: datetime  # UTC
+    start_date: date  # local
+    start_time: time
+    end_date: date
+    end_time: time
+    conflicts_with: list[int] = []
+
+
+class ScheduleConflict(BaseModel):
+    code: Literal["schedule_conflict"] = "schedule_conflict"
+    message: str
+    conflicts: list[OccurrenceOut]  # the existing occurrences that overlap (first few)
+    total: int
+
+
+class CalendarOut(BaseModel):
+    start: date  # inclusive local date
+    end: date  # exclusive local date
+    time_zone: str
+    occurrences: list[OccurrenceOut]
+    deadlines: list[AssignmentOut]
+
+
 class TodayOut(BaseModel):
     today: date
     time_zone: str
     overdue: list[AssignmentOut]
     due_today: list[AssignmentOut]
     upcoming: list[AssignmentOut]
+    events: list[OccurrenceOut] = []

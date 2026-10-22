@@ -9,6 +9,7 @@ from sqlalchemy import ColumnElement, Date, and_, cast, func, or_, select
 from sqlalchemy.dialects.postgresql import TIMESTAMP, insert
 from sqlalchemy.orm import Session
 
+from app.calendar import shaped_window
 from app.deps import DB, CurrentAuth, Now
 from app.idempotency import IdempotencyKey
 from app.models import Assignment, Course
@@ -218,7 +219,10 @@ def today_view(auth: CurrentAuth, db: DB, now: Now) -> TodayOut:
             due_today.append(out)
         else:
             upcoming.append(out)
-    return TodayOut(today=today, time_zone=tz, overdue=overdue, due_today=due_today, upcoming=upcoming)
+    events = shaped_window(db, auth.user.id, tz, start_of_date(today, tz), end_of_date(today, tz))
+    return TodayOut(
+        today=today, time_zone=tz, overdue=overdue, due_today=due_today, upcoming=upcoming, events=events
+    )
 
 
 @router.get("/assignments/{assignment_id}", response_model=AssignmentOut)

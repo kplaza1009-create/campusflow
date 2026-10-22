@@ -12,7 +12,7 @@ from sqlalchemy import text
 from app.config import get_settings
 from app.db import engine
 from app.deps import UNSAFE_METHODS
-from app.routers import account, assignments, auth, courses
+from app.routers import account, assignments, auth, courses, events
 
 settings = get_settings()
 logging.basicConfig(level=settings.log_level, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -62,6 +62,7 @@ app.include_router(auth.router)
 app.include_router(account.router)
 app.include_router(courses.router)
 app.include_router(assignments.router)
+app.include_router(events.router)
 
 
 @app.get("/api/health", tags=["health"])

@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.deps import DB, CurrentAuth, Now
 from app.idempotency import IdempotencyKey
-from app.models import Assignment, Course
+from app.models import Assignment, Course, Event
 from app.schemas import CourseCreate, CourseOut, CourseUpdate, DeletionImpact
 
 router = APIRouter(prefix="/api/courses", tags=["courses"])
@@ -98,7 +98,8 @@ def _impact(db: Session, user_id: int, course_id: int) -> DeletionImpact:
     n = db.scalar(
         select(func.count()).where(Assignment.user_id == user_id, Assignment.course_id == course_id)
     )
-    return DeletionImpact(assignments=n or 0)
+    e = db.scalar(select(func.count()).where(Event.user_id == user_id, Event.course_id == course_id))
+    return DeletionImpact(assignments=n or 0, events=e or 0)
 
 
 @router.get("/{course_id}/deletion-impact", response_model=DeletionImpact)
@@ -115,6 +116,7 @@ def delete_course(
     expected_assignments: int = Query(
         description="The assignment count the user confirmed. Must match the current count."
     ),
+    expected_events: int = Query(0, description="The event count the user confirmed."),
 ) -> None:
     # Lock the course row so the count can't change between checking and deleting.
     course = db.scalar(
@@ -123,11 +125,12 @@ def delete_course(
     if course is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Course not found.")
     impact = _impact(db, auth.user.id, course_id)
-    if impact.assignments != expected_assignments:
+    if (impact.assignments, impact.events) != (expected_assignments, expected_events):
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            f"This course now has {impact.assignments} assignments. Review and confirm again.",
+            f"This course now has {impact.assignments} assignments and {impact.events} calendar events."
+            " Review and confirm again.",
         )
-    # Assignments go with it through ON DELETE CASCADE, in this same transaction.
+    # Assignments and events go with it through ON DELETE CASCADE, in this same transaction.
     db.delete(course)
     db.commit()
