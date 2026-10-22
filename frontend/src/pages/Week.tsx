@@ -14,16 +14,28 @@ import { useUser } from '../session'
 const HOUR = 48 // px per hour in the grid
 const DAYS = 7
 
-const isPhone = () => typeof window !== 'undefined' && window.matchMedia('(max-width: 760px)').matches
+const PHONE = '(max-width: 760px)'
+
+/** True on phone-width screens, kept current as the window resizes. */
+function useIsPhone(): boolean {
+  const [phone, setPhone] = useState(() => window.matchMedia(PHONE).matches)
+  useEffect(() => {
+    const mq = window.matchMedia(PHONE)
+    const update = () => setPhone(mq.matches)
+    mq.addEventListener('change', update)
+    return () => mq.removeEventListener('change', update)
+  }, [])
+  return phone
+}
 
 export function WeekPage() {
   const user = useUser()
   const today = todayIn(user.time_zone)
   const [params, setParams] = useSearchParams()
   const start = weekStart(params.get('start') ?? today)
-  // The grid needs width; on a phone the agenda is the default view.
-  const [defaultView] = useState(() => (isPhone() ? 'agenda' : 'week'))
-  const view = params.get('view') ?? defaultView
+  // A seven-column time grid doesn't fit a phone, so phones always get the agenda.
+  const phone = useIsPhone()
+  const view = phone ? 'agenda' : (params.get('view') ?? 'week')
   const cal = useCalendar(start, DAYS)
   const events = useEventDialog()
   const days = useMemo(() => Array.from({ length: DAYS }, (_, i) => addDays(start, i)), [start])
@@ -101,16 +113,18 @@ export function WeekPage() {
             <ChevronRight size={18} aria-hidden="true" />
           </button>
         </div>
-        <div className="segmented" role="group" aria-label="View">
-          {[
-            ['week', 'Week'],
-            ['agenda', 'Agenda'],
-          ].map(([value, label]) => (
-            <button key={value} type="button" aria-pressed={view === value} onClick={() => go({ view: value })}>
-              {label}
-            </button>
-          ))}
-        </div>
+        {!phone && (
+          <div className="segmented" role="group" aria-label="View">
+            {[
+              ['week', 'Week'],
+              ['agenda', 'Agenda'],
+            ].map(([value, label]) => (
+              <button key={value} type="button" aria-pressed={view === value} onClick={() => go({ view: value })}>
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {cal.isError && !data ? (
