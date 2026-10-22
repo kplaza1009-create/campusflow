@@ -260,6 +260,13 @@ def create_assignment(
     # 3. Warn about a likely duplicate unless the user already chose to save anyway.
     if not body.allow_duplicate:
         matches = _likely_duplicates(db, user_id, body, tz, local_date, exclude_id=None)
+        # A concurrent retry with the same key may have just saved the "duplicate":
+        # that's this same request, so replay it instead of warning.
+        replay = next((m for m in matches if key is not None and m.idempotency_key == key), None)
+        if replay is not None:
+            response.status_code = status.HTTP_200_OK
+            response.headers["Idempotent-Replayed"] = "true"
+            return to_out(replay, tz, now)
         if matches:
             return _duplicate_response(matches, tz, now)
 
