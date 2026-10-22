@@ -7,6 +7,7 @@ import { Shell } from './components/Shell'
 import { AssignmentsPage } from './pages/Assignments'
 import { AuthPage } from './pages/Auth'
 import { CoursesPage } from './pages/Courses'
+import { NotificationsPage } from './pages/Notifications'
 import { SettingsPage } from './pages/Settings'
 import { TodayPage } from './pages/Today'
 import { WeekPage } from './pages/Week'
@@ -89,6 +90,7 @@ export default function App() {
               <Route path="/week" element={<WeekPage />} />
               <Route path="/assignments" element={<AssignmentsPage />} />
               <Route path="/courses" element={<CoursesPage />} />
+              <Route path="/notifications" element={<NotificationsPage />} />
               <Route path="/settings" element={<SettingsPage />} />
             </Route>
           </Route>

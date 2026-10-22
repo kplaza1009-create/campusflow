@@ -17,7 +17,18 @@ export function invalidateWork(qc: QueryClient) {
     qc.invalidateQueries({ queryKey: ['assignments'] }),
     qc.invalidateQueries({ queryKey: ['courses'] }),
     qc.invalidateQueries({ queryKey: ['calendar'] }),
+    qc.invalidateQueries({ queryKey: ['reminders'] }),
   ])
+}
+
+/** In-app notifications. Polled, since the worker creates them in the background. */
+export function useNotifications() {
+  return useQuery({
+    queryKey: ['notifications'],
+    queryFn: api.notifications,
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: true,
+  })
 }
 
 export function useCalendar(start: string, days = 7) {

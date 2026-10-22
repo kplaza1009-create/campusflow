@@ -306,6 +306,7 @@ textarea {
 @media (max-width: 999px) {
   .shell {
     grid-template-columns: minmax(0, 1fr);
+    align-content: start; /* short pages start under the top bar instead of spreading out */
   }
   .sidebar {
     display: none;
@@ -548,10 +549,18 @@ input[type='time'] {
   user-select: none;
 }
 .check-label input {
+  flex: none;
   width: 16px;
   height: 16px;
   margin: 0;
   accent-color: var(--primary);
+}
+/* A label that wraps keeps its box beside the first line. */
+.settings-section .check-label {
+  align-items: flex-start;
+}
+.settings-section .check-label input {
+  margin-top: 2px;
 }
 
 .swatches {
@@ -1640,4 +1649,108 @@ dialog.sheet::backdrop {
   .schedule-row .agenda-conflict {
     grid-column: 2;
   }
+}
+
+/* ---- Notifications ------------------------------------------------------------ */
+
+.nav .count-info {
+  color: var(--accent);
+}
+.topbar .icon-link {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  margin: 0 8px 0 auto;
+  border-radius: var(--radius-control);
+  color: var(--text);
+}
+.topbar .icon-link.active {
+  background: var(--active);
+}
+.icon-link .badge {
+  position: absolute;
+  top: 3px;
+  right: 1px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 9px;
+  background: var(--accent);
+  color: var(--primary-ink);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 17px;
+  text-align: center;
+}
+.note-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.note-list li + li {
+  border-top: 1px solid var(--rule);
+}
+.note-row {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 60px;
+  padding: 10px 16px;
+  border: 0;
+  background: none;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+@media (hover: hover) and (pointer: fine) {
+  .note-row:hover {
+    background: var(--raised);
+  }
+}
+.note-main {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+/* Unread is carried by weight, a dot, and hidden "Unread:" text, never by color alone. */
+.note-row .a-title {
+  font-weight: 400;
+}
+.note-row.is-unread .a-title {
+  font-weight: 600;
+}
+.note-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.note-row.is-unread .note-dot {
+  background: var(--accent);
+}
+/* The due date and delivery time are the content here, so they read at 13px, not 12. */
+.note-row .a-meta,
+.note-time {
+  font-size: 13px;
+}
+.note-time {
+  color: var(--muted);
+  white-space: nowrap;
+}
+@media (max-width: 520px) {
+  .note-row {
+    grid-template-columns: 8px minmax(0, 1fr);
+    row-gap: 4px;
+  }
+  .note-time {
+    grid-column: 2;
+  }
+}
+.reminder-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
 }

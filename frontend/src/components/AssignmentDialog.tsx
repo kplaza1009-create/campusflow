@@ -1,4 +1,4 @@
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { X } from 'lucide-react'
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link } from 'react-router'
@@ -12,8 +12,9 @@ import {
   type AssignmentInput,
   type Course,
   type DuplicateWarning,
+  type Reminder,
 } from '../api'
-import { formatTime, relativeDay, todayIn } from '../dates'
+import { formatInstant, formatTime, relativeDay, todayIn } from '../dates'
 import { invalidateWork, useCourses } from '../queries'
 import { useUser } from '../session'
 import { errorMessage } from '../errors'
@@ -379,7 +380,13 @@ function AssignmentForm({
             </option>
           ))}
         </select>
-        <span className="hint">Saved with the assignment. Reminder delivery arrives in the next release.</span>
+        <span className="hint">
+          Arrives in Notifications{user.email_reminders ? ' and by email' : ''}.
+          {!form.has_time && Number(form.reminder) % 1440 === 0 && form.reminder !== ''
+            ? ' Without a due time, day-based reminders arrive at 9:00 AM.'
+            : ''}
+        </span>
+        {editing && <ReminderHistory assignmentId={editing.id} timeZone={user.time_zone} />}
       </div>
 
       <div className="field">
@@ -492,5 +499,52 @@ function AssignmentForm({
         </div>
       )}
     </form>
+  )
+}
+
+const CHANNEL_LABEL = { in_app: 'In app', email: 'Email' } as const
+
+/** What happened to this assignment's latest reminder on each channel, in plain words. */
+function describeReminder(r: Reminder, timeZone: string): string {
+  const at = (iso: string) => formatInstant(iso, timeZone)
+  switch (r.status) {
+    case 'pending':
+      return r.attempts > 0
+        ? `Retrying ${at(r.next_attempt_at)} (attempt ${r.attempts + 1})`
+        : `Scheduled for ${at(r.send_at)}`
+    case 'processing':
+      return 'Sending now'
+    case 'delivered':
+      return r.channel === 'email'
+        ? `Delivered ${at(r.finished_at ?? r.send_at)}`
+        : `In Notifications since ${at(r.finished_at ?? r.send_at)}`
+    case 'accepted':
+      return `Handed to the email provider ${at(r.finished_at ?? r.send_at)}; delivery not confirmed yet`
+    case 'captured':
+      return `Saved locally ${at(r.finished_at ?? r.send_at)} (test mode, not sent)`
+    case 'skipped':
+      return `Skipped: ${r.detail ?? 'no longer needed'}`
+    case 'failed':
+      return `Failed: ${r.detail ?? 'unknown error'}`
+    case 'cancelled':
+      return 'Cancelled'
+  }
+}
+
+function ReminderHistory({ assignmentId, timeZone }: { assignmentId: number; timeZone: string }) {
+  const { data } = useQuery({ queryKey: ['reminders', assignmentId], queryFn: () => api.reminders(assignmentId) })
+  // Newest first from the API: keep the latest non-cancelled reminder per channel.
+  const latest = (['in_app', 'email'] as const)
+    .map((channel) => data?.find((r) => r.channel === channel && r.status !== 'cancelled'))
+    .filter((r): r is Reminder => r !== undefined)
+  if (latest.length === 0) return null
+  return (
+    <span className="hint reminder-status">
+      {latest.map((r) => (
+        <span key={r.id}>
+          <b>{CHANNEL_LABEL[r.channel]}:</b> {describeReminder(r, timeZone)}
+        </span>
+      ))}
+    </span>
   )
 }

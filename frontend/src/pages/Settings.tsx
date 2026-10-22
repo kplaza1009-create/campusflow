@@ -55,6 +55,7 @@ export function SettingsPage() {
       </div>
       <div>
         <TimeZoneSection />
+        <RemindersSection />
         <PasswordSection />
         <SignOutSection />
         <DeleteAccountSection />
@@ -92,7 +93,7 @@ function TimeZoneSection() {
     setSaving(true)
     setError(null)
     try {
-      const updated = await api.updateSettings(zone)
+      const updated = await api.updateSettings({ time_zone: zone })
       qc.setQueryData(SESSION_KEY, (s: { user: unknown; csrf_token: string | null } | undefined) =>
         s ? { ...s, user: updated } : s,
       )
@@ -161,6 +162,71 @@ function TimeZoneSection() {
           </div>
         )}
       </form>
+    </Section>
+  )
+}
+
+function RemindersSection() {
+  const user = useUser()
+  const qc = useQueryClient()
+  const ids = useId()
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  // The box shows the saved value, and only changes once the server has saved it.
+  const toggle = async (on: boolean) => {
+    setSaving(true)
+    setError(null)
+    try {
+      const updated = await api.updateSettings({ email_reminders: on })
+      qc.setQueryData(SESSION_KEY, (s: { user: unknown; csrf_token: string | null } | undefined) =>
+        s ? { ...s, user: updated } : s,
+      )
+      await qc.invalidateQueries({ queryKey: ['reminders'] })
+      toast.success(on ? 'Email reminders on' : 'Email reminders off')
+    } catch (err) {
+      setError(errorMessage(err))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Section
+      title="Reminders"
+      about="Reminders always appear in CampusFlow under Notifications. You can get them by email too."
+    >
+      <div className="form">
+        <div className="field">
+          <label className="check-label" htmlFor={`${ids}-email`}>
+            <input
+              id={`${ids}-email`}
+              type="checkbox"
+              checked={user.email_reminders}
+              disabled={saving}
+              onChange={(e) => void toggle(e.target.checked)}
+              aria-describedby={`${ids}-email-hint`}
+            />
+            Email me reminders at {user.email}
+          </label>
+          <span className="hint" id={`${ids}-email-hint`}>
+            {user.email_delivery === 'capture'
+              ? 'This server is in local test mode: reminder emails are saved to a file, not sent.'
+              : 'Sent through Resend. The first one may land in spam.'}{' '}
+            Each assignment&apos;s reminder time is set when you add or edit it.
+          </span>
+        </div>
+        {saving && (
+          <span className="hint" role="status">
+            Saving…
+          </span>
+        )}
+        {error && (
+          <div className="notice error" role="alert">
+            {error}
+          </div>
+        )}
+      </div>
     </Section>
   )
 }

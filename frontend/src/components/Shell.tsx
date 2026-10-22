@@ -1,7 +1,7 @@
-import { BookOpen, CalendarDays, ListChecks, Plus, Settings, Sun } from 'lucide-react'
+import { Bell, BookOpen, CalendarDays, ListChecks, Plus, Settings, Sun } from 'lucide-react'
 import { NavLink, Outlet } from 'react-router'
 
-import { useToday } from '../queries'
+import { useNotifications, useToday } from '../queries'
 import { useUser } from '../session'
 import { AssignmentDialogProvider } from './AssignmentDialog'
 import { useAssignmentDialog } from './assignmentDialogContext'
@@ -13,8 +13,11 @@ const NAV = [
   { to: '/week', label: 'Week', icon: CalendarDays, end: false },
   { to: '/assignments', label: 'Assignments', icon: ListChecks, end: false },
   { to: '/courses', label: 'Courses', icon: BookOpen, end: false },
+  { to: '/notifications', label: 'Notifications', icon: Bell, end: false },
   { to: '/settings', label: 'Settings', icon: Settings, end: false },
 ]
+// Phones have room for five tabs; Notifications lives in the top bar there instead.
+const TABS = NAV.filter((n) => n.to !== '/notifications')
 
 export function Shell() {
   return (
@@ -31,6 +34,7 @@ function ShellLayout() {
   const today = useToday()
   const dialog = useAssignmentDialog()
   const overdue = today.data?.overdue.length ?? 0
+  const unread = useNotifications().data?.unread ?? 0
 
   return (
     <div className="shell">
@@ -53,6 +57,11 @@ function ShellLayout() {
                   {overdue}
                 </span>
               )}
+              {to === '/notifications' && unread > 0 && (
+                <span className="count count-info num" aria-label={`${unread} unread`}>
+                  {unread}
+                </span>
+              )}
             </NavLink>
           ))}
         </nav>
@@ -68,6 +77,14 @@ function ShellLayout() {
         <NavLink to="/" className="brand" aria-label="CampusFlow home" style={{ padding: 0 }}>
           <Logo size={22} />
           CampusFlow
+        </NavLink>
+        <NavLink
+          to="/notifications"
+          className="icon-link"
+          aria-label={unread > 0 ? `Notifications, ${unread} unread` : 'Notifications'}
+        >
+          <Bell size={20} strokeWidth={1.75} aria-hidden="true" />
+          {unread > 0 && <span className="badge num">{unread > 9 ? '9+' : unread}</span>}
         </NavLink>
         <button
           type="button"
@@ -85,7 +102,7 @@ function ShellLayout() {
       </main>
 
       <nav className="tabbar" aria-label="Main">
-        {NAV.map(({ to, label, icon: Icon, end }) => (
+        {TABS.map(({ to, label, icon: Icon, end }) => (
           <NavLink key={to} to={to} end={end}>
             <Icon size={20} strokeWidth={1.75} aria-hidden="true" />
             {label}

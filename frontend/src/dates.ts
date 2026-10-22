@@ -67,3 +67,19 @@ export function relativeDay(date: string, today: string): string {
 export function plural(n: number, word: string, many = `${word}s`): string {
   return `${n} ${n === 1 ? word : many}`
 }
+
+/** An exact instant (ISO string) as "Today, 9:00 AM" or "Mon, Oct 19, 9:00 AM" in `timeZone`. */
+export function formatInstant(iso: string, timeZone: string): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(new Date(iso))
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? ''
+  const date = `${get('year')}-${get('month')}-${get('day')}`
+  return `${relativeDay(date, todayIn(timeZone))}, ${formatTime(`${get('hour')}:${get('minute')}`)}`
+}

@@ -4,7 +4,37 @@
 // state-changing requests we also send the CSRF token the server issued with the
 // session, which a cross-site page cannot read.
 
-export type User = { id: number; email: string; time_zone: string }
+export type User = {
+  id: number
+  email: string
+  time_zone: string
+  email_reminders: boolean
+  email_delivery: 'capture' | 'resend' // how this server handles reminder email
+}
+
+export type AppNotification = {
+  id: number
+  title: string
+  body: string
+  assignment_id: number | null
+  created_at: string
+  read_at: string | null
+}
+
+export type ReminderStatus =
+  'pending' | 'processing' | 'captured' | 'accepted' | 'delivered' | 'skipped' | 'cancelled' | 'failed'
+
+export type Reminder = {
+  id: number
+  channel: 'in_app' | 'email'
+  status: ReminderStatus
+  send_at: string
+  attempts: number
+  next_attempt_at: string
+  detail: string | null
+  provider_status: string | null
+  finished_at: string | null
+}
 export type Session = { user: User | null; csrf_token: string | null }
 
 export type Course = {
@@ -219,7 +249,8 @@ export const api = {
     request<Session>('POST', '/api/auth/register', { email, password, time_zone }),
   logout: () => request<void>('POST', '/api/auth/logout'),
 
-  updateSettings: (time_zone: string) => request<User>('PATCH', '/api/account', { time_zone }),
+  updateSettings: (changes: { time_zone?: string; email_reminders?: boolean }) =>
+    request<User>('PATCH', '/api/account', changes),
   changePassword: (current_password: string, new_password: string) =>
     request<void>('POST', '/api/account/password', { current_password, new_password }),
   deleteAccount: (password: string) => request<void>('DELETE', '/api/account', { password }),
@@ -253,6 +284,12 @@ export const api = {
   setCompleted: (id: number, completed: boolean) =>
     request<Assignment>('POST', `/api/assignments/${id}/completion`, { completed }),
   deleteAssignment: (id: number) => request<void>('DELETE', `/api/assignments/${id}`),
+  assignment: (id: number) => request<Assignment>('GET', `/api/assignments/${id}`),
+  reminders: (assignmentId: number) => request<Reminder[]>('GET', `/api/assignments/${assignmentId}/reminders`),
+
+  notifications: () => request<{ unread: number; items: AppNotification[] }>('GET', '/api/notifications'),
+  markRead: (id: number) => request<AppNotification>('POST', `/api/notifications/${id}/read`),
+  markAllRead: () => request<void>('POST', '/api/notifications/read-all'),
 }
 
 export type CourseInput = { name: string; code: string | null; instructor: string | null; color: string }
