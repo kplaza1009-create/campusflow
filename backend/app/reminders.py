@@ -58,7 +58,12 @@ class Planned:
 
 
 def identity(r: Planned | Reminder) -> Identity:
-    """Which reminder this is: channel, lead time, and due date (or exact due instant)."""
+    """Which reminder this is: channel, lead time, and due date (or exact due instant).
+
+    Legacy reminders (scheduled before due_on existed, whose due date couldn't be
+    verified on upgrade) have no due_on, so they are identified by the deadline instant
+    they recorded. That never equals a date, so they can't block the current schedule.
+    """
     return (r.channel, r.lead_minutes, r.due_on if r.due_on is not None else r.deadline_at)
 
 

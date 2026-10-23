@@ -266,6 +266,10 @@ class Reminder(Base):
     # and lead_minutes it identifies the reminder independently of the time zone, so a
     # zone change moves a waiting reminder but never re-sends a delivered one.
     due_on: Mapped[date | None] = mapped_column(Date)
+    # True for a reminder from before due_on existed whose original due date couldn't be
+    # verified on upgrade (the deadline or time zone changed since). It is matched only by
+    # its recorded deadline_at instant, never by a guessed date.
+    legacy_identity: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     lead_minutes: Mapped[int] = mapped_column(Integer)
     send_at: Mapped[datetime] = mapped_column(TZ)
     status: Mapped[str] = mapped_column(String(12), server_default=text("'pending'"))
