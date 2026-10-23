@@ -216,7 +216,8 @@ function RemindersSection() {
               id={`${ids}-email`}
               type="checkbox"
               checked={user.email_reminders}
-              disabled={saving || user.is_demo}
+              // Unavailable: still let someone turn it off if it was on before.
+              disabled={saving || user.is_demo || (user.email_delivery === 'unavailable' && !user.email_reminders)}
               onChange={(e) => void toggle(e.target.checked)}
               aria-describedby={`${ids}-email-hint`}
             />
@@ -225,9 +226,11 @@ function RemindersSection() {
           <span className="hint" id={`${ids}-email-hint`}>
             {user.is_demo
               ? 'The shared demo never sends email.'
-              : user.email_delivery === 'capture'
-                ? 'This server is in local test mode: reminder emails are saved to a file, not sent.'
-                : 'Sent through Resend. The first one may land in spam.'}{' '}
+              : user.email_delivery === 'unavailable'
+                ? 'This deployment can only email its owner (it uses Resend’s free plan), so your reminders stay in the app.'
+                : user.email_delivery === 'capture'
+                  ? 'This server is in local test mode: reminder emails are saved to a file, not sent.'
+                  : 'Sent through Resend. The first one may land in spam.'}{' '}
             Each assignment&apos;s reminder time is set when you add or edit it.
           </span>
         </div>

@@ -9,7 +9,7 @@ export type User = {
   email: string
   time_zone: string
   email_reminders: boolean
-  email_delivery: 'capture' | 'resend' // how this server handles reminder email
+  email_delivery: 'capture' | 'resend' | 'unavailable' // what happens to this user's reminder email
   is_demo: boolean // the shared demo account
   demo_reset_utc_hour: number // the demo is rebuilt every night at this hour (UTC)
 }

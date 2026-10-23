@@ -1,10 +1,11 @@
 """Application settings, read from environment variables (see .env.example)."""
 
+import json
 from functools import lru_cache
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import Field, SecretStr
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, SecretStr, field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -29,6 +30,15 @@ class Settings(BaseSettings):
     login_max_failures_per_ip: int = 30
     register_max_per_ip_per_hour: int = 10
 
+    # How many proxies in front of the app append to X-Forwarded-For. 0: use the TCP peer
+    # (local development). Behind proxies, the client is the entry that many places from
+    # the right; entries further left are whatever the client sent, so they're ignored.
+    trusted_proxy_hops: int = 0
+
+    # The built frontend (frontend/dist). When set, the API serves it too, so the app
+    # and API share one origin in production.
+    frontend_dist: str | None = None
+
     log_level: str = "INFO"
 
     # Reminder email. "capture" (default) writes messages to a local file and never
@@ -40,7 +50,7 @@ class Settings(BaseSettings):
     # If set, email only goes to these addresses (lowercase); everyone else's reminders
     # stay in-app. Resend's free test mode can only deliver to the account owner, and
     # the demo account must never send external email. Real addresses live only here.
-    email_allowed_recipients: list[str] = Field(default=[])
+    email_allowed_recipients: Annotated[list[str], NoDecode] = Field(default=[])
     app_url: str = "http://localhost:5173"  # used for links in reminder emails
 
     # The shared demo account. Its data is rebuilt by `python -m app.demo`, which the
@@ -53,6 +63,23 @@ class Settings(BaseSettings):
     worker_poll_seconds: int = 30
     reminder_max_attempts: int = 5
     reminder_lease_minutes: int = 5  # a claimed job is reclaimed if its worker goes quiet this long
+
+    @field_validator("email_allowed_recipients", mode="before")
+    @classmethod
+    def _split_recipients(cls, value: object) -> object:
+        # Accept a JSON list or a plain comma-separated value: easy to paste into a host's form.
+        if isinstance(value, str):
+            value = json.loads(value) if value.lstrip().startswith("[") else value.split(",")
+        return [v.strip() for v in value if v.strip()] if isinstance(value, list) else value
+
+    @field_validator("database_url")
+    @classmethod
+    def _use_psycopg(cls, url: str) -> str:
+        # Hosts hand out postgres:// or postgresql:// URLs; SQLAlchemy needs the driver named.
+        for prefix in ("postgres://", "postgresql://"):
+            if url.startswith(prefix):
+                return "postgresql+psycopg://" + url.removeprefix(prefix)
+        return url
 
     @property
     def is_production(self) -> bool:

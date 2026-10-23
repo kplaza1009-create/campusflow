@@ -29,9 +29,20 @@ log = logging.getLogger("campusflow.auth")
 TOO_MANY = "Too many attempts. Please wait a few minutes and try again."
 
 
-def _client_ip(request: Request) -> str:
-    # Behind a proxy, run uvicorn with --proxy-headers so this is the real client.
-    return request.client.host if request.client else "unknown"
+def client_ip(request: Request) -> str:
+    """The address rate limits count against. A client can put anything in
+    X-Forwarded-For, so only the entry our own proxies added is trusted."""
+    hops = get_settings().trusted_proxy_hops
+    if hops == 0:
+        return request.client.host if request.client else "unknown"
+    forwarded = [h.strip() for h in request.headers.get("x-forwarded-for", "").split(",") if h.strip()]
+    log.debug("x-forwarded-for has %s entries", len(forwarded))  # to check the hop count; no IPs
+    if len(forwarded) < hops:
+        log.warning(
+            "x-forwarded-for has %s entries, fewer than CAMPUSFLOW_TRUSTED_PROXY_HOPS", len(forwarded)
+        )
+        return "unknown"
+    return forwarded[-hops]
 
 
 def _set_cookie(response: Response, token: str) -> None:
@@ -69,7 +80,7 @@ def current_session(request: Request, db: DB, now: Now) -> SessionOut:
 @router.post("/register", response_model=SessionOut, status_code=status.HTTP_201_CREATED)
 def register(body: Registration, request: Request, response: Response, db: DB, now: Now) -> SessionOut:
     s = get_settings()
-    ip_bucket = f"register:ip:{_client_ip(request)}"
+    ip_bucket = f"register:ip:{client_ip(request)}"
     lock_buckets(db, ip_bucket)
     if count_events(db, ip_bucket, now - timedelta(hours=1)) >= s.register_max_per_ip_per_hour:
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, TOO_MANY)
@@ -99,7 +110,7 @@ def login(body: Credentials, request: Request, response: Response, db: DB, now: 
     s = get_settings()
     email = body.email.lower()
     email_bucket = f"login:email:{email}"
-    ip_bucket = f"login:ip:{_client_ip(request)}"
+    ip_bucket = f"login:ip:{client_ip(request)}"
     since = now - timedelta(minutes=s.login_window_minutes)
 
     lock_buckets(db, email_bucket, ip_bucket)
@@ -134,7 +145,7 @@ def demo_login(request: Request, response: Response, db: DB, now: Now) -> Sessio
     s = get_settings()
     if not s.demo_enabled:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "The demo isn't available on this server.")
-    bucket = f"demo:ip:{_client_ip(request)}"
+    bucket = f"demo:ip:{client_ip(request)}"
     lock_buckets(db, bucket)
     if count_events(db, bucket, now - timedelta(hours=1)) >= s.demo_logins_per_ip_per_hour:
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, TOO_MANY)

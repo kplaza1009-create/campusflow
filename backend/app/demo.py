@@ -1,4 +1,6 @@
 """The shared demo account: `python -m app.demo` creates it, or wipes and rebuilds it.
+`python -m app.demo --if-missing` only creates it (the server runs this on start, so a
+fresh deployment has a demo before the first nightly reset).
 
 The demo is a normal account. `users.is_demo` grants nothing; it only removes the
 abilities that would let one visitor spoil the demo for the next (changing the
@@ -11,6 +13,7 @@ rejects it, so nobody can register it first.
 
 import logging
 import secrets
+import sys
 from datetime import UTC, date, datetime, time, timedelta
 
 from sqlalchemy import select
@@ -146,13 +149,17 @@ def reset_demo(db: Session, now: datetime) -> User:
     return user
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
+    if_missing = "--if-missing" in (sys.argv[1:] if argv is None else argv)
     settings = get_settings()
     logging.basicConfig(level=settings.log_level, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     if not settings.demo_enabled:
         log.info("demo disabled (CAMPUSFLOW_DEMO_ENABLED=false); nothing to do")
         return
     with SessionLocal() as db:
+        if if_missing and db.scalar(select(User.id).where(User.is_demo)) is not None:
+            log.info("demo account exists; leaving it until the nightly reset")
+            return
         user = reset_demo(db, datetime.now(UTC))
         db.commit()
         log.info("demo account reset user_id=%s", user.id)

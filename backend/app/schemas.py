@@ -9,6 +9,7 @@ from pydantic import (
     EmailStr,
     Field,
     StringConstraints,
+    computed_field,
     field_validator,
     model_validator,
 )
@@ -66,8 +67,17 @@ class UserOut(BaseModel):
     is_demo: bool
     # When the shared demo resets (shown in its banner), as an hour in UTC.
     demo_reset_utc_hour: int = Field(default_factory=lambda: get_settings().demo_reset_utc_hour)
-    # How this server handles reminder email: "capture" saves it locally, "resend" sends it.
-    email_delivery: Literal["capture", "resend"] = Field(default_factory=lambda: get_settings().email_mode)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def email_delivery(self) -> Literal["capture", "resend", "unavailable"]:
+        """What happens to this user's reminder email: saved locally, sent, or nothing,
+        because this server only emails the addresses on its allowlist."""
+        s = get_settings()
+        allowed = {e.lower() for e in s.email_allowed_recipients}
+        if s.email_mode == "resend" and allowed and self.email.lower() not in allowed:
+            return "unavailable"
+        return s.email_mode
 
 
 class SessionOut(BaseModel):

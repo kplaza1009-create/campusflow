@@ -1,12 +1,14 @@
-"""FastAPI application: routers, CORS, the Origin check, and the health endpoint."""
+"""FastAPI application: routers, CORS, the Origin check, security headers, the health
+endpoint, and (when CAMPUSFLOW_FRONTEND_DIST is set) the built frontend."""
 
 import logging
 import time
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy import text
 
 from app.config import get_settings
@@ -18,7 +20,25 @@ settings = get_settings()
 logging.basicConfig(level=settings.log_level, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("campusflow.http")
 
-app = FastAPI(title="CampusFlow API", version="0.1.0")
+# The interactive docs load scripts from a CDN, which the CSP below forbids: dev only.
+app = FastAPI(
+    title="CampusFlow API",
+    version="0.1.0",
+    docs_url=None if settings.is_production else "/docs",
+    redoc_url=None if settings.is_production else "/redoc",
+)
+
+SECURITY_HEADERS = {
+    # Everything loads from this origin. Inline styles are allowed because the toast
+    # library injects a <style> tag; no inline or third-party script runs anywhere.
+    "Content-Security-Policy": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
+    "object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "same-origin",
+    "X-Frame-Options": "DENY",
+}
+if settings.is_production:
+    SECURITY_HEADERS["Strict-Transport-Security"] = "max-age=31536000"
 
 
 @app.middleware("http")
@@ -48,6 +68,15 @@ async def access_log(request: Request, call_next: Callable[[Request], Awaitable[
     return response
 
 
+# Registered last, so it wraps the others and every response gets the headers.
+@app.middleware("http")
+async def security_headers(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
+    response = await call_next(request)
+    for name, value in SECURITY_HEADERS.items():
+        response.headers.setdefault(name, value)
+    return response
+
+
 # Only needed when the frontend is served from a different origin than the API.
 app.add_middleware(
     CORSMiddleware,
@@ -71,3 +100,31 @@ def health() -> dict[str, str]:
     with engine.connect() as conn:
         conn.execute(text("SELECT 1"))
     return {"status": "ok", "database": "ok"}
+
+
+CACHE_FOREVER = "public, max-age=31536000, immutable"
+REVALIDATE = "no-cache"
+
+
+def serve_frontend(target: FastAPI, dist: Path) -> None:
+    """Serve the built app: real files as they are, any other path as index.html so the
+    client-side router can handle it. Unknown /api paths stay JSON 404s."""
+    dist = dist.resolve()
+    index = dist / "index.html"
+    if not index.is_file():
+        raise RuntimeError(f"CAMPUSFLOW_FRONTEND_DIST has no index.html: {dist}")
+
+    @target.get("/{path:path}", include_in_schema=False)
+    def frontend(path: str) -> FileResponse:
+        if path == "api" or path.startswith("api/"):
+            raise HTTPException(status.HTTP_404_NOT_FOUND)
+        file = (dist / path).resolve()
+        if path and file.is_file() and file.is_relative_to(dist):
+            # Vite fingerprints everything under assets/, so those files never change.
+            cache = CACHE_FOREVER if path.startswith("assets/") else REVALIDATE
+            return FileResponse(file, headers={"Cache-Control": cache})
+        return FileResponse(index, headers={"Cache-Control": REVALIDATE})
+
+
+if settings.frontend_dist:
+    serve_frontend(app, Path(settings.frontend_dist))
