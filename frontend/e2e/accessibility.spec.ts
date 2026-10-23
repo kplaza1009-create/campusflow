@@ -60,6 +60,17 @@ async function seed(page: Page) {
   })
 }
 
+// The app runs under the server's Content-Security-Policy here, as in production.
+// Anything the policy blocks (an inline script, a third-party font) fails the test.
+let blocked: string[] = []
+test.beforeEach(({ page }) => {
+  blocked = []
+  page.on('console', (m) => {
+    if (m.type() === 'error' && m.text().includes('Content Security Policy')) blocked.push(m.text())
+  })
+})
+test.afterEach(() => expect(blocked, 'blocked by the Content-Security-Policy').toEqual([]))
+
 const PAGES = [
   ['Today', '/'],
   ['Week grid', '/week?view=week'],

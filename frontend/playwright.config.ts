@@ -2,10 +2,10 @@ import { defineConfig, devices } from '@playwright/test'
 
 import { E2E_DATABASE_URL } from './e2e/env'
 
-// The browser tests start their own API (on its own database) and dev server,
+// The browser tests build the frontend and run it the way production does: served by
+// FastAPI on one origin, with its security headers, against the tests' own database,
 // so they never touch your development data.
-const API_PORT = 8011
-const WEB_PORT = 5181
+const PORT = 8011
 const DB_URL = E2E_DATABASE_URL
 
 export default defineConfig({
@@ -15,7 +15,7 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
   use: {
-    baseURL: `http://127.0.0.1:${WEB_PORT}`,
+    baseURL: `http://127.0.0.1:${PORT}`,
     timezoneId: 'America/New_York',
     locale: 'en-US',
     trace: 'retain-on-failure',
@@ -33,25 +33,23 @@ export default defineConfig({
       },
     },
   ],
-  webServer: [
-    {
-      command: `uv run python -m scripts.ensure_db && uv run alembic upgrade head && uv run uvicorn app.main:app --host 127.0.0.1 --port ${API_PORT}`,
-      cwd: '../backend',
-      url: `http://127.0.0.1:${API_PORT}/api/health`,
-      env: {
-        CAMPUSFLOW_DATABASE_URL: DB_URL,
-        CAMPUSFLOW_ALLOWED_ORIGINS: `["http://127.0.0.1:${WEB_PORT}"]`,
-        CAMPUSFLOW_REGISTER_MAX_PER_IP_PER_HOUR: '1000',
-      },
-      reuseExistingServer: false,
-      timeout: 120_000,
+  webServer: {
+    command: [
+      'npm --prefix ../frontend run build',
+      'uv run python -m scripts.ensure_db',
+      'uv run alembic upgrade head',
+      `uv run uvicorn app.main:app --host 127.0.0.1 --port ${PORT}`,
+    ].join(' && '),
+    cwd: '../backend',
+    url: `http://127.0.0.1:${PORT}/api/health`,
+    env: {
+      CAMPUSFLOW_DATABASE_URL: DB_URL,
+      CAMPUSFLOW_FRONTEND_DIST: '../frontend/dist',
+      CAMPUSFLOW_ALLOWED_ORIGINS: '[]',
+      CAMPUSFLOW_REGISTER_MAX_PER_IP_PER_HOUR: '1000',
+      CAMPUSFLOW_LOG_LEVEL: 'WARNING',
     },
-    {
-      command: `npx vite --host 127.0.0.1`,
-      url: `http://127.0.0.1:${WEB_PORT}`,
-      env: { PORT: String(WEB_PORT), CAMPUSFLOW_API_URL: `http://127.0.0.1:${API_PORT}` },
-      reuseExistingServer: false,
-      timeout: 60_000,
-    },
-  ],
+    reuseExistingServer: false,
+    timeout: 180_000,
+  },
 })
