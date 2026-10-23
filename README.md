@@ -46,7 +46,7 @@ Students juggle deadlines from four to six courses, each with its own syllabus, 
 ```mermaid
 flowchart LR
   B[Browser<br/>React + TypeScript] -- "/api/* (same origin in dev via Vite proxy)<br/>cookie + X-CSRF-Token" --> A[FastAPI API<br/>sync route handlers]
-  A -- SQLAlchemy 2.x<br/>psycopg 3 --> D[(PostgreSQL 16)]
+  A -- SQLAlchemy 2.x<br/>psycopg 3 --> D[(PostgreSQL 18)]
   W[Reminder worker<br/>python -m app.worker] -- "claims due jobs<br/>FOR UPDATE SKIP LOCKED" --> D
   W -- "HTTPS + Idempotency-Key<br/>(or local capture file)" --> R[Resend]
 ```
@@ -166,7 +166,7 @@ Exactly one of `due_date` or `due_at` is set; a check constraint enforces it. Li
 | Routing | React Router | 8.5 |
 | UI details | lucide-react icons, Sonner toasts, Instrument Sans (self-hosted) | 1.61, 2.0, 5.x |
 | Backend | Python, FastAPI, Uvicorn | 3.12+, 0.159, 0.54 |
-| Database | PostgreSQL, SQLAlchemy, Alembic, psycopg | 16, 2.1, 1.20, 3.3 |
+| Database | PostgreSQL, SQLAlchemy, Alembic, psycopg | 18, 2.1, 1.20, 3.3 |
 | Validation | Pydantic, pydantic-settings | 2.14, 2.16 |
 | Passwords | argon2-cffi (Argon2id) | 25.1 |
 | Tests | pytest, Playwright, axe-core (`@axe-core/playwright`) | 9.1, 1.64, 4.13 |
@@ -176,7 +176,7 @@ Exact versions are pinned in `backend/uv.lock` and `frontend/package-lock.json`.
 
 ## Running it locally
 
-Prerequisites: PostgreSQL 16, [uv](https://docs.astral.sh/uv/), and Node 24.
+Prerequisites: PostgreSQL 18, [uv](https://docs.astral.sh/uv/), and Node 24.
 
 ```bash
 # 1. Database role (once). CREATEDB lets the tests create throwaway databases.
@@ -241,7 +241,7 @@ npx playwright install chromium   # once
 npm run test:e2e
 ```
 
-GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs all three jobs on every push and pull request, with a PostgreSQL 16 service container.
+GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs all three jobs on every push and pull request, with a PostgreSQL 18 service container.
 
 What the 143 backend tests cover (97% line coverage):
 

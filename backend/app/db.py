@@ -16,7 +16,12 @@ class Base(DeclarativeBase):
     pass
 
 
-engine = create_engine(get_settings().database_url, pool_pre_ping=True)
+# Every session runs in UTC, so timestamps come back the same way whatever the server's
+# default zone is (a local PostgreSQL may default to the machine's zone; Neon uses UTC).
+# Needs a direct connection: some connection poolers drop startup options.
+engine = create_engine(
+    get_settings().database_url, pool_pre_ping=True, connect_args={"options": "-c timezone=UTC"}
+)
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 
 
