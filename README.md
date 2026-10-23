@@ -134,6 +134,7 @@ erDiagram
     timestamptz next_attempt_at "backoff"
     timestamptz locked_until "worker lease"
     date due_on "date-only due date: part of the reminder's identity"
+    bool legacy_identity "pre-upgrade reminder whose due date couldn't be verified"
     varchar detail "why cancelled, skipped, or failed"
     varchar provider_message_id
     varchar provider_status "Resend last_event"
@@ -192,7 +193,7 @@ uv run uvicorn app.main:app --reload --port 8000
 # 3. Reminder worker (another terminal). Email is captured to backend/.captured-email/ by default.
 cd backend
 uv run python -m app.worker                      # add --once to process what's due and exit
-# After upgrading an existing database to this version, run once:  uv run python -m app.worker --resync
+# After upgrading an existing database, run once (safe to repeat):  uv run python -m app.worker --resync
 
 # 4. Frontend (another terminal)
 cd frontend
@@ -242,7 +243,7 @@ npm run test:e2e
 
 GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs all three jobs on every push and pull request, with a PostgreSQL 16 service container.
 
-What the 136 backend tests cover (96% line coverage):
+What the 143 backend tests cover (97% line coverage):
 
 - **Auth:** HTTP-only cookie, email normalization, generic login errors, server-side logout (a replayed cookie fails), idle and absolute expiry, CSRF header required for writes, cross-origin writes rejected, login throttling that survives across clients, password change signing out other devices, account deletion.
 - **Isolation:** another user's records return 404 by ID for read, edit, complete, delete, archive, and deletion-impact. An assignment can't be attached to another user's course, and the database itself rejects such a row. Idempotency keys are scoped per user.
@@ -251,6 +252,7 @@ What the 136 backend tests cover (96% line coverage):
 - **Time:** spring-forward gaps, fall-back overlaps, overdue exactly after 11:59 PM local, time zone changes, and "today" computed in the user's zone rather than UTC.
 - **Scheduling rules (pure functions, no database):** adjacent events don't conflict, a one-minute overlap does, overnight events clash with the next morning, weekly expansion stays inside both the window and the series dates, classes keep their local time through daylight saving, a class start in the spring-forward gap moves forward, a repeated fall-back time uses the first one, and a class defined in another zone keeps that zone's wall time.
 - **Reminders (53 tests):** each reminder delivered at most once: no second delivery after editing the title or description, saving unchanged settings, resyncing repeatedly before and after delivery, syncing while the worker holds the job, completing and reopening, a time zone change, or turning email on late, while a new deadline or lead time still gets its replacement; when reminders fire (9:00 AM for day-based leads on date-only deadlines, counting back from midnight for hour-based ones, immediately if the time has passed but the deadline hasn't); rescheduling on edit, completion, reopening, archiving, time zone changes, and email opt-in; four concurrent resyncs leaving exactly one pending reminder; three concurrent workers claiming 30 jobs with no job claimed twice; a crashed worker's job reclaimed after its lease, with the late worker unable to deliver it again; a job that keeps crashing its worker failing after 5 attempts; backoff of 1 then 4 minutes with a stable idempotency key across retries; permanent errors failing without retries; the outage policy; rechecking a reminder completed or rescheduled after it was claimed; provider confirmation moving `accepted` to `delivered` or `failed`; capture mode; the recipient allowlist; Resend request shape and error classification (with simulated HTTP); log masking; isolation between users; and the worker's command line.
+- **Migrations (7 tests, each on its own disposable database):** a database populated at the revision before reminder identity is upgraded with Alembic and then exercised with the real sync and worker code, with the clock at 2026-10-16 12:00 UTC: a deadline moved from Oct 15 (reminder sent) to Oct 20 keeps its Oct 20 replacement through repeated resyncs and delivers it exactly once, keeping delivery ids and notification links, both on a straight upgrade and on a database where the faulty backfill had already run; an unchanged deadline is never delivered again; a replacement the faulty identity already cancelled is restored by `--resync`; unverifiable records are flagged and kept; and a fresh install migrates up, down, and up again with no drift from the models.
 - **Calendar API:** validation (end after start, unique weekdays, series at most a year), conflict warnings for one-time and recurring events with **Save anyway**, deadlines that never block time, overnight events, editing a whole series, idempotent create, bounded windows, archived courses' events hidden and ignored for conflicts, events on Today, deleting a course with its events, and isolation between users.
 
 Eight frontend unit tests cover the week grid's geometry (overnight events split across two days, overlapping events side by side, adjacent ones not, the visible hour range) and when a time-based label must next update.
@@ -340,6 +342,8 @@ Time zones for events:
 **The queue is a PostgreSQL table.** Each `reminders` row is one reminder on one channel (in-app or email) and is also the job the worker processes. A broker such as Redis or RabbitMQ would be one more service to run, secure, and back up, and wouldn't remove the need to keep scheduling state in the database. At this scale (a few jobs per student per week) PostgreSQL's row locks are enough. The tradeoff: workers poll (every 30 seconds by default) instead of being pushed work, so a reminder can arrive up to one poll interval late.
 
 **Scheduling stays in sync with the data.** Every change that could affect a reminder (creating, editing, completing, reopening, deleting, archiving a course, changing time zone or email opt-in) recalculates that assignment's reminders in the same transaction, so the queue can't disagree with the assignment. The assignment row and its reminder rows are locked first: simultaneous edits wait their turn, and the worker, which claims with `SKIP LOCKED`, passes over them until the change commits. A partial unique index enforces at most one pending reminder per assignment and channel.
+
+**Reminders from before the identity column.** A reminder records the deadline instant it was scheduled for, but not the time zone it was computed in or whether the deadline was date-only at the time. On upgrade, a reminder gets a due date only when two records agree: its recorded deadline is exactly the deadline the assignment's *current* due date produces in the user's *current* zone. One that matches the current exact-time deadline is identified by that instant. Anything else (the deadline moved, the zone changed, or the deadline switched between date-only and exact time) can't be reconstructed reliably: the same instant is local midnight for different dates in different zones, and could have been an exact-time deadline. Those reminders are kept unchanged as history, flagged `legacy_identity`, and matched only by their exact recorded instant, so they never block the current schedule. The tradeoff, chosen deliberately: if a date-only reminder was sent and the user then changed time zone *before* upgrading, that one reminder may be sent once more. Guessing instead could silently cancel a reminder the student needs.
 
 **Each reminder is delivered at most once.** A reminder is identified by its channel, its lead time, and the due date (or the exact due instant for timed deadlines), not by when it fires. Once one has been delivered, captured, accepted, failed, or skipped, or while a worker is sending it, it is never scheduled again. Only a cancelled one, which was never attempted, can come back.
 
