@@ -545,6 +545,8 @@ input[type='time'] {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
+  overflow-wrap: anywhere; /* a long email in the label must wrap, not widen the page */
   cursor: pointer;
   user-select: none;
 }
