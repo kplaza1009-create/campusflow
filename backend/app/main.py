@@ -114,7 +114,8 @@ def serve_frontend(target: FastAPI, dist: Path) -> None:
     if not index.is_file():
         raise RuntimeError(f"CAMPUSFLOW_FRONTEND_DIST has no index.html: {dist}")
 
-    @target.get("/{path:path}", include_in_schema=False)
+    # HEAD too: uptime checks and `curl -I` use it, and it must match GET minus the body.
+    @target.api_route("/{path:path}", methods=["GET", "HEAD"], include_in_schema=False)
     def frontend(path: str) -> FileResponse:
         if path == "api" or path.startswith("api/"):
             raise HTTPException(status.HTTP_404_NOT_FOUND)

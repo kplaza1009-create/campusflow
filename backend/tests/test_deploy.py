@@ -74,6 +74,19 @@ def test_serves_the_built_frontend(tmp_path: Path) -> None:
         assert (r.status_code, r.text, r.headers["cache-control"]) == (200, "<div id=root></div>", "no-cache")
     assert client.get("/api/unknown").status_code == 404
 
+    # HEAD (uptime checks, `curl -I`) answers like GET, minus the body.
+    for path, cache in [
+        ("/", "no-cache"),
+        ("/week", "no-cache"),
+        ("/assets/index-abc123.js", "public, max-age=31536000, immutable"),
+        ("/assets/%2e%2e/%2e%2e/secret.txt", "no-cache"),  # still the app shell, never the file
+    ]:
+        get, head = client.get(path), client.head(path)
+        assert (head.status_code, head.content, head.headers["cache-control"]) == (200, b"", cache)
+        assert head.headers["content-type"] == get.headers["content-type"]
+        assert head.headers["content-length"] == str(len(get.content))
+    assert client.head("/api/unknown").status_code == 404
+
 
 def test_server_start_creates_the_demo_only_when_missing(clock: Clock) -> None:
     def demo_id() -> int | None:

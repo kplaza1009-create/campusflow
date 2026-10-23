@@ -128,12 +128,20 @@ jobs:
           for _ in $(seq 60); do curl -fsS localhost:8080/api/health && exit 0; sleep 2; done
           exit 1
       - name: Smoke test
+        # Each response is saved before grep reads it: in a pipe, a failed curl would be
+        # hidden behind grep's exit status (an error page can still carry the headers).
         run: |
-          set -x
-          curl -fsS localhost:8080/week | grep -q '<div id="root">'
-          curl -fsSI localhost:8080/ | grep -qi '^content-security-policy:'
-          curl -fsSI localhost:8080/ | grep -qi '^strict-transport-security:'
-          curl -fsS -X POST localhost:8080/api/auth/demo -H 'X-Forwarded-For: 198.51.100.7' | grep -q '"is_demo":true'
-          curl -fsS localhost:8080/docs | grep -q '<div id="root">'  # the app, not Swagger
+          set -euxo pipefail
+          page=$(curl -fsS localhost:8080/week)
+          grep -q '<div id="root">' <<<"$page"
+          head=$(curl -fsSI localhost:8080/)  # HEAD must answer 200, like GET
+          grep -qi '^content-security-policy:' <<<"$head"
+          grep -qi '^strict-transport-security:' <<<"$head"
+          grep -qi '^cache-control: no-cache' <<<"$head"
+          curl -fsSI localhost:8080/week >/dev/null
+          demo=$(curl -fsS -X POST localhost:8080/api/auth/demo -H 'X-Forwarded-For: 198.51.100.7')
+          grep -q '"is_demo":true' <<<"$demo"
+          docs=$(curl -fsS localhost:8080/docs)
+          grep -q '<div id="root">' <<<"$docs"  # the app, not Swagger
       - if: always()
         run: docker logs app
