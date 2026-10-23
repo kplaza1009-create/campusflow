@@ -1,0 +1,60 @@
+name: Scheduled jobs
+
+# Free hosting has no always-on background worker, so GitHub Actions runs the two
+# background jobs against the production database:
+#   - reminders: every 30 minutes, `python -m app.worker --once` sends everything due
+#   - demo reset: nightly at 08:00 UTC (CAMPUSFLOW_DEMO_RESET_UTC_HOUR), `python -m app.demo`
+# GitHub can start scheduled runs late when it's busy; a late run still catches up on
+# everything that came due. Run either job by hand from the Actions tab.
+#
+# Needs repository secrets CAMPUSFLOW_DATABASE_URL, CAMPUSFLOW_RESEND_API_KEY,
+# CAMPUSFLOW_EMAIL_ALLOWED_RECIPIENTS, and the variable CAMPUSFLOW_APP_URL.
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+    - cron: "0 8 * * *"
+  workflow_dispatch:
+    inputs:
+      job:
+        description: Which job to run
+        type: choice
+        options: [reminders, demo-reset]
+        default: reminders
+
+concurrency:
+  group: scheduled-${{ github.event.schedule || inputs.job }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    # Forks have no secrets; don't run there.
+    if: github.repository == 'kplaza1009-create/campusflow'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      CAMPUSFLOW_ENVIRONMENT: production
+      CAMPUSFLOW_DATABASE_URL: ${{ secrets.CAMPUSFLOW_DATABASE_URL }}
+      CAMPUSFLOW_EMAIL_MODE: resend
+      CAMPUSFLOW_RESEND_API_KEY: ${{ secrets.CAMPUSFLOW_RESEND_API_KEY }}
+      CAMPUSFLOW_EMAIL_ALLOWED_RECIPIENTS: ${{ secrets.CAMPUSFLOW_EMAIL_ALLOWED_RECIPIENTS }}
+      CAMPUSFLOW_APP_URL: ${{ vars.CAMPUSFLOW_APP_URL }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --locked --no-dev
+      - name: Send due reminders
+        if: github.event.schedule == '*/30 * * * *' || inputs.job == 'reminders'
+        run: uv run --no-dev python -m app.worker --once
+      - name: Reset the shared demo
+        if: github.event.schedule == '0 8 * * *' || inputs.job == 'demo-reset'
+        run: uv run --no-dev python -m app.demo

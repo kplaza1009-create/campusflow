@@ -1,0 +1,32 @@
+# Render Blueprint: Dashboard -> New -> Blueprint -> pick this repo.
+# Free plan: the service sleeps after 15 idle minutes and wakes on the next visit
+# (about a minute). The database is Neon (free); reminders and the nightly demo reset
+# run on GitHub Actions (.github/workflows/scheduled.yml), not here.
+services:
+  - type: web
+    name: campusflow
+    runtime: docker
+    plan: free
+    region: ohio # next to Neon's us-east-2
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    envVars:
+      # Secrets: Render asks for these when you create the Blueprint. Never commit them.
+      - key: CAMPUSFLOW_DATABASE_URL # Neon connection string (direct, not pooled)
+        sync: false
+      - key: CAMPUSFLOW_EMAIL_ALLOWED_RECIPIENTS # your Resend sign-up address
+        sync: false
+      - key: CAMPUSFLOW_EMAIL_MODE # the scheduled worker sends; the site says who can get email
+        value: resend
+      - key: CAMPUSFLOW_ENVIRONMENT
+        value: production
+      - key: CAMPUSFLOW_SESSION_COOKIE_SECURE
+        value: "true"
+      - key: CAMPUSFLOW_SESSION_COOKIE_NAME
+        value: __Host-cf_session
+      - key: CAMPUSFLOW_ALLOWED_ORIGINS
+        value: "[]" # same origin only
+      - key: CAMPUSFLOW_TRUSTED_PROXY_HOPS
+        value: "2"
+      - key: CAMPUSFLOW_LOG_LEVEL
+        value: INFO
