@@ -46,6 +46,7 @@ function convertExample(from: string, to: string): string {
 const pretty = (zone: string) => zone.replaceAll('_', ' ')
 
 export function SettingsPage() {
+  const user = useUser()
   return (
     <div className="page narrow">
       <div className="title-row">
@@ -56,9 +57,21 @@ export function SettingsPage() {
       <div>
         <TimeZoneSection />
         <RemindersSection />
-        <PasswordSection />
+        {user.is_demo ? (
+          <Section
+            title="Shared demo"
+            about="This account is shared by everyone trying CampusFlow and rebuilt every night."
+          >
+            <p className="hint">
+              Its password, email reminders, and deletion are turned off so one visitor can&apos;t spoil it for the
+              next. Create your own account to use them.
+            </p>
+          </Section>
+        ) : (
+          <PasswordSection />
+        )}
         <SignOutSection />
-        <DeleteAccountSection />
+        {!user.is_demo && <DeleteAccountSection />}
       </div>
     </div>
   )
@@ -203,16 +216,18 @@ function RemindersSection() {
               id={`${ids}-email`}
               type="checkbox"
               checked={user.email_reminders}
-              disabled={saving}
+              disabled={saving || user.is_demo}
               onChange={(e) => void toggle(e.target.checked)}
               aria-describedby={`${ids}-email-hint`}
             />
             Email me reminders at {user.email}
           </label>
           <span className="hint" id={`${ids}-email-hint`}>
-            {user.email_delivery === 'capture'
-              ? 'This server is in local test mode: reminder emails are saved to a file, not sent.'
-              : 'Sent through Resend. The first one may land in spam.'}{' '}
+            {user.is_demo
+              ? 'The shared demo never sends email.'
+              : user.email_delivery === 'capture'
+                ? 'This server is in local test mode: reminder emails are saved to a file, not sent.'
+                : 'Sent through Resend. The first one may land in spam.'}{' '}
             Each assignment&apos;s reminder time is set when you add or edit it.
           </span>
         </div>

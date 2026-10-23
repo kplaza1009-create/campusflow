@@ -1784,3 +1784,40 @@ dialog.sheet::backdrop {
   flex-wrap: wrap;
   gap: 4px 12px;
 }
+
+/* ---- Demo -------------------------------------------------------------------- */
+
+.demo-entry {
+  display: grid;
+  gap: 8px;
+  padding-top: 16px;
+  border-top: 1px solid var(--rule);
+}
+.demo-entry p {
+  font-size: var(--fs-small);
+  line-height: 16px;
+}
+/* Quiet and persistent: information, not an alarm. */
+.demo-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 16px;
+  max-width: 1040px;
+  margin: 0 auto 24px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--raised);
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 18px;
+}
+.demo-banner p {
+  flex: 1 1 320px;
+  margin: 0;
+}
+.demo-banner b {
+  color: var(--text);
+  font-weight: 600;
+}

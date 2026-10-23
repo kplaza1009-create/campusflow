@@ -128,6 +128,30 @@ def login(body: Credentials, request: Request, response: Response, db: DB, now: 
     return SessionOut(user=UserOut.model_validate(user), csrf_token=session.csrf_token)
 
 
+@router.post("/demo", response_model=SessionOut)
+def demo_login(request: Request, response: Response, db: DB, now: Now) -> SessionOut:
+    """One click into the shared demo account. Rate limited per IP like registration."""
+    s = get_settings()
+    if not s.demo_enabled:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "The demo isn't available on this server.")
+    bucket = f"demo:ip:{_client_ip(request)}"
+    lock_buckets(db, bucket)
+    if count_events(db, bucket, now - timedelta(hours=1)) >= s.demo_logins_per_ip_per_hour:
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, TOO_MANY)
+    user = db.scalar(select(User).where(User.is_demo))
+    if user is None:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, "The demo is being reset. Try again in a minute."
+        )
+    record_event(db, bucket, now)
+    prune_events(db, now)
+    token, session = create_session(db, user, now)
+    db.commit()
+    _set_cookie(response, token)
+    log.info("demo login user_id=%s", user.id)
+    return SessionOut(user=UserOut.model_validate(user), csrf_token=session.csrf_token)
+
+
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 def logout(auth: CurrentAuth, response: Response, db: DB) -> None:
     db.execute(delete(UserSession).where(UserSession.id == auth.session.id))

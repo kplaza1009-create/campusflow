@@ -1,5 +1,11 @@
 import { Bell, BookOpen, CalendarDays, ListChecks, Plus, Settings, Sun } from 'lucide-react'
+import { useState } from 'react'
 import { NavLink, Outlet } from 'react-router'
+import { toast } from 'sonner'
+
+import { api } from '../api'
+import { formatInstant, nextUtcHour } from '../dates'
+import { errorMessage } from '../errors'
 
 import { useNotifications, useToday } from '../queries'
 import { useUser } from '../session'
@@ -98,6 +104,7 @@ function ShellLayout() {
       </header>
 
       <main id="main" className="main" tabIndex={-1}>
+        {user.is_demo && <DemoBanner resetHourUtc={user.demo_reset_utc_hour} timeZone={user.time_zone} />}
         <Outlet />
       </main>
 
@@ -110,5 +117,37 @@ function ShellLayout() {
         ))}
       </nav>
     </div>
+  )
+}
+
+/** Shown on every page of the shared demo: who else sees this, and when it resets. */
+function DemoBanner({ resetHourUtc, timeZone }: { resetHourUtc: number; timeZone: string }) {
+  const [busy, setBusy] = useState(false)
+  const [now] = useState(Date.now) // read once: a reset signs every visitor out anyway
+  const nextReset = formatInstant(new Date(nextUtcHour(resetHourUtc, now)).toISOString(), timeZone).replace(
+    /^(Today|Tomorrow)/,
+    (w) => w.toLowerCase(),
+  ) // mid-sentence: "next reset tomorrow, 4:00 AM"
+  const ownAccount = async () => {
+    setBusy(true)
+    try {
+      await api.logout()
+      // A full load: drops every cached demo record, and avoids racing the sign-in redirect.
+      window.location.assign('/register')
+    } catch (err) {
+      toast.error(`Couldn't sign out of the demo. ${errorMessage(err)}`)
+      setBusy(false)
+    }
+  }
+  return (
+    <section className="demo-banner" aria-label="About the demo">
+      <p>
+        <b>You&apos;re in the shared demo.</b> Anyone trying it sees the same data and can change it. Everything resets
+        to the sample data every night; next reset {nextReset}.
+      </p>
+      <button type="button" className="link-button" onClick={() => void ownAccount()} disabled={busy}>
+        Create your own account
+      </button>
+    </section>
   )
 }

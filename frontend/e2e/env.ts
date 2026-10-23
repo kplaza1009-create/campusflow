@@ -9,7 +9,16 @@ export const E2E_DATABASE_URL =
 
 /** Run the real reminder worker once against the test database (email is captured, never sent). */
 export function runWorkerOnce(): string {
-  return execFileSync('uv', ['run', 'python', '-m', 'app.worker', '--once'], {
+  return runBackend('app.worker', '--once')
+}
+
+/** Rebuild the shared demo account in the test database, as the nightly job does. */
+export function resetDemo(): string {
+  return runBackend('app.demo')
+}
+
+function runBackend(module: string, ...args: string[]): string {
+  return execFileSync('uv', ['run', 'python', '-m', module, ...args], {
     cwd: join(import.meta.dirname, '..', '..', 'backend'),
     env: {
       ...process.env,

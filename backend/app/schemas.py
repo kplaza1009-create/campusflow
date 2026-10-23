@@ -63,6 +63,9 @@ class UserOut(BaseModel):
     email: str
     time_zone: str
     email_reminders: bool
+    is_demo: bool
+    # When the shared demo resets (shown in its banner), as an hour in UTC.
+    demo_reset_utc_hour: int = Field(default_factory=lambda: get_settings().demo_reset_utc_hour)
     # How this server handles reminder email: "capture" saves it locally, "resend" sends it.
     email_delivery: Literal["capture", "resend"] = Field(default_factory=lambda: get_settings().email_mode)
 

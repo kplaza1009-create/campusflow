@@ -89,3 +89,10 @@ export function nextChange(times: number[], now: number): number | null {
   const future = times.filter((t) => t > now)
   return future.length ? Math.min(...future) : null
 }
+
+/** The next time (ms) the clock reads `hour`:00 in UTC, at or after `now`. */
+export function nextUtcHour(hour: number, now: number): number {
+  const d = new Date(now)
+  const at = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), hour)
+  return at >= now ? at : at + 86_400_000
+}

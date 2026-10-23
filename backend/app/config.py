@@ -43,6 +43,12 @@ class Settings(BaseSettings):
     email_allowed_recipients: list[str] = Field(default=[])
     app_url: str = "http://localhost:5173"  # used for links in reminder emails
 
+    # The shared demo account. Its data is rebuilt by `python -m app.demo`, which the
+    # scheduler runs nightly at this UTC hour (8 = 4:00 AM Eastern daylight time).
+    demo_enabled: bool = True
+    demo_reset_utc_hour: int = 8
+    demo_logins_per_ip_per_hour: int = 30
+
     # Reminder worker.
     worker_poll_seconds: int = 30
     reminder_max_attempts: int = 5

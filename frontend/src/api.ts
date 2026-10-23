@@ -10,6 +10,8 @@ export type User = {
   time_zone: string
   email_reminders: boolean
   email_delivery: 'capture' | 'resend' // how this server handles reminder email
+  is_demo: boolean // the shared demo account
+  demo_reset_utc_hour: number // the demo is rebuilt every night at this hour (UTC)
 }
 
 export type AppNotification = {
@@ -248,6 +250,7 @@ export const api = {
   register: (email: string, password: string, time_zone: string) =>
     request<Session>('POST', '/api/auth/register', { email, password, time_zone }),
   logout: () => request<void>('POST', '/api/auth/logout'),
+  demoLogin: () => request<Session>('POST', '/api/auth/demo'),
 
   updateSettings: (changes: { time_zone?: string; email_reminders?: boolean }) =>
     request<User>('PATCH', '/api/account', changes),

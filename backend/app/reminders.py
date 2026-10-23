@@ -98,7 +98,8 @@ def plan(a: Assignment, course: Course, user: User, now: datetime) -> list[Plann
     if deadline <= now:
         return []
     send_at = max(reminder_time(a, a.reminder_minutes, tz), now)
-    channels = ["in_app", "email"] if user.email_reminders else ["in_app"]
+    # The shared demo never sends external email, even if the flag were somehow set.
+    channels = ["in_app", "email"] if user.email_reminders and not user.is_demo else ["in_app"]
     return [Planned(c, deadline, a.due_date, a.reminder_minutes, send_at) for c in channels]
 
 

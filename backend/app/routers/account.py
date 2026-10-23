@@ -12,6 +12,14 @@ from app.security import hash_password, verify_password
 
 router = APIRouter(prefix="/api/account", tags=["account"])
 
+NOT_IN_DEMO = "That isn't available in the shared demo account. Create your own account to use it."
+
+
+def _not_demo(user: User) -> None:
+    """Changes that would spoil the shared demo for the next visitor."""
+    if user.is_demo:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, NOT_IN_DEMO)
+
 
 @router.patch("", response_model=UserOut)
 def update_settings(body: SettingsUpdate, auth: CurrentAuth, db: DB, now: Now) -> User:
@@ -20,6 +28,8 @@ def update_settings(body: SettingsUpdate, auth: CurrentAuth, db: DB, now: Now) -
     if body.time_zone is not None:
         auth.user.time_zone = body.time_zone
     if body.email_reminders is not None:
+        if body.email_reminders:
+            _not_demo(auth.user)  # the demo never sends external email
         auth.user.email_reminders = body.email_reminders
     # Date-only reminders follow the zone, and email ones follow the opt-in: resync both.
     sync_assignments(db, auth.user, now)
@@ -29,6 +39,7 @@ def update_settings(body: SettingsUpdate, auth: CurrentAuth, db: DB, now: Now) -
 
 @router.post("/password", status_code=status.HTTP_204_NO_CONTENT)
 def change_password(body: PasswordChange, auth: CurrentAuth, db: DB) -> None:
+    _not_demo(auth.user)
     if not verify_password(auth.user, body.current_password):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Your current password is incorrect.")
     auth.user.password_hash = hash_password(body.new_password)
@@ -41,6 +52,7 @@ def change_password(body: PasswordChange, auth: CurrentAuth, db: DB) -> None:
 
 @router.delete("", status_code=status.HTTP_204_NO_CONTENT)
 def delete_account(body: AccountDeletion, auth: CurrentAuth, db: DB, response: Response) -> None:
+    _not_demo(auth.user)
     if not verify_password(auth.user, body.password):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Your password is incorrect.")
     # Courses, assignments, and sessions are removed by ON DELETE CASCADE.

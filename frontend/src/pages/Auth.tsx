@@ -30,6 +30,17 @@ export function AuthPage({ mode }: { mode: Mode }) {
     }
   }
 
+  const tryDemo = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      apply(await api.demoLogin())
+    } catch (err) {
+      setError(err instanceof ApiError ? err : new ApiError(0, errorMessage(err), null))
+      setBusy(false)
+    }
+  }
+
   const message = error && (Object.keys(error.fields).length ? 'Check the highlighted fields.' : error.message)
 
   return (
@@ -100,6 +111,21 @@ export function AuthPage({ mode }: { mode: Mode }) {
               {busy ? (isLogin ? 'Signing in…' : 'Creating account…') : isLogin ? 'Sign in' : 'Create account'}
             </button>
           </form>
+
+          <div className="demo-entry">
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={busy}
+              onClick={tryDemo}
+              style={{ width: '100%' }}
+            >
+              Try the demo
+            </button>
+            <p className="muted">
+              A shared sample account with courses, classes, and deadlines. It resets every night.
+            </p>
+          </div>
 
           <p className="muted">
             {isLogin ? 'New here? ' : 'Already have an account? '}

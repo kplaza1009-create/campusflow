@@ -44,6 +44,9 @@ class User(Base):
     time_zone: Mapped[str] = mapped_column(String(64))
     # Reminders always appear in CampusFlow; email is opt-in.
     email_reminders: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    # The shared demo account (app/demo.py). Grants nothing: it only *removes* abilities
+    # that would let one visitor spoil the demo for others (password, deletion, email).
+    is_demo: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     created_at: Mapped[datetime] = mapped_column(TZ, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(TZ, server_default=func.now(), onupdate=func.now())
 
