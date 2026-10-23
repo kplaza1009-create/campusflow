@@ -19,6 +19,7 @@ import { invalidateWork, useCourses } from '../queries'
 import { remember, remembered } from '../remember'
 import { useUser } from '../session'
 import { EventDialogContext, type EventDialogOptions } from './eventDialogContext'
+import { useReturnFocus } from './useReturnFocus'
 
 const LAST_COURSE = 'campusflow:last-event-course'
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
@@ -30,9 +31,13 @@ export function EventDialogProvider({ children }: { children: ReactNode }) {
     options: {},
     session: 0,
   })
+  const rememberFocus = useReturnFocus(state.open)
   const open = useCallback(
-    (options: EventDialogOptions = {}) => setState((s) => ({ open: true, options, session: s.session + 1 })),
-    [],
+    (options: EventDialogOptions = {}) => {
+      rememberFocus()
+      setState((s) => ({ open: true, options, session: s.session + 1 }))
+    },
+    [rememberFocus],
   )
   const close = useCallback(() => setState((s) => ({ ...s, open: false })), [])
   const value = useMemo(() => ({ open }), [open])

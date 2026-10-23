@@ -569,7 +569,8 @@ input[type='time'] {
   gap: 8px;
 }
 .swatch {
-  position: relative;
+  appearance: none;
+  margin: 0;
   width: 28px;
   height: 28px;
   border-radius: 999px;
@@ -580,12 +581,10 @@ input[type='time'] {
 .swatch:active {
   transform: scale(0.94);
 }
-.swatch[aria-checked='true']::after {
-  content: '';
-  position: absolute;
-  inset: -4px;
-  border: 2px solid var(--text);
-  border-radius: 999px;
+.swatch:checked {
+  box-shadow:
+    0 0 0 2px var(--surface),
+    0 0 0 4px var(--text);
 }
 
 .form-actions {

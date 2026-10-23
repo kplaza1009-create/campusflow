@@ -20,6 +20,7 @@ import { useUser } from '../session'
 import { errorMessage } from '../errors'
 import { isTyping, remember, remembered } from '../remember'
 import { AssignmentDialogContext } from './assignmentDialogContext'
+import { useReturnFocus } from './useReturnFocus'
 
 // Remembered between sessions on this device, so adding several assignments
 // for one course takes one field instead of three.
@@ -32,9 +33,13 @@ export function AssignmentDialogProvider({ children }: { children: ReactNode }) 
     editing: null,
     session: 0,
   })
+  const rememberFocus = useReturnFocus(state.open)
   const open = useCallback(
-    (a?: Assignment | null) => setState((s) => ({ open: true, editing: a ?? null, session: s.session + 1 })),
-    [],
+    (a?: Assignment | null) => {
+      rememberFocus()
+      setState((s) => ({ open: true, editing: a ?? null, session: s.session + 1 }))
+    },
+    [rememberFocus],
   )
   const close = useCallback(() => setState((s) => ({ ...s, open: false })), [])
 

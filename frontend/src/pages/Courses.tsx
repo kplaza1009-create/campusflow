@@ -16,7 +16,15 @@ export function CoursesPage() {
   // "?new=1" (from Today or the assignment form) opens the new-course form.
   const [creatingState, setCreating] = useState(false)
   const creating = creatingState || params.has('new')
+  // An inline form replaces the button that opened it, so when the form closes,
+  // focus goes back to that button instead of falling to the top of the page.
+  const refocus = useRef<string | null>(null)
+  useEffect(() => {
+    if (refocus.current) document.getElementById(refocus.current)?.focus()
+    refocus.current = null
+  })
   const closeCreate = () => {
+    refocus.current = 'new-course-button'
     setCreating(false)
     if (params.has('new')) setParams({}, { replace: true })
   }
@@ -33,7 +41,10 @@ export function CoursesPage() {
         <div className="course-edit">
           <CourseForm
             course={c}
-            onDone={() => setEditingId(null)}
+            onDone={() => {
+              refocus.current = `edit-course-${c.id}`
+              setEditingId(null)
+            }}
             onDelete={() => {
               setEditingId(null)
               setDeleting(c)
@@ -52,6 +63,7 @@ export function CoursesPage() {
             type="button"
             className="btn btn-ghost btn-small"
             onClick={() => setEditingId(c.id)}
+            id={`edit-course-${c.id}`}
             aria-label={`Edit ${c.name}`}
           >
             Edit
@@ -72,7 +84,7 @@ export function CoursesPage() {
         </div>
         <div className="actions">
           {!creating && (
-            <button type="button" className="btn btn-primary" onClick={() => setCreating(true)}>
+            <button type="button" id="new-course-button" className="btn btn-primary" onClick={() => setCreating(true)}>
               <Plus size={16} aria-hidden="true" />
               New course
             </button>
@@ -223,15 +235,16 @@ function CourseForm({ course, onDone, onDelete }: { course?: Course; onDone: () 
         </span>
         <div className="swatches" role="radiogroup" aria-labelledby={`${ids}-color`}>
           {COURSE_COLORS.map((c) => (
-            <button
+            // Native radios: one Tab stop for the group, arrow keys to choose.
+            <input
               key={c.value}
-              type="button"
-              role="radio"
+              type="radio"
+              name={`${ids}-color`}
               className="swatch"
-              aria-checked={form.color === c.value}
+              checked={form.color === c.value}
               aria-label={c.name}
               style={{ background: c.value }}
-              onClick={() => set('color', c.value)}
+              onChange={() => set('color', c.value)}
             />
           ))}
         </div>
