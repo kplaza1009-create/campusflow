@@ -359,6 +359,7 @@ def main(argv: list[str] | None = None) -> None:
 
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
+    failed = False
     while True:
         try:
             counts = run_once(sender, settings, worker_id)
@@ -366,6 +367,7 @@ def main(argv: list[str] | None = None) -> None:
                 log.info("batch done %s", counts)
         except Exception:  # keep the worker alive through a bad batch; jobs stay leased and retry
             log.exception("batch failed")
+            failed = True
         if args.once or stopping:
             break
         for _ in range(settings.worker_poll_seconds):
@@ -373,6 +375,9 @@ def main(argv: list[str] | None = None) -> None:
                 break
             time.sleep(1)
     log.info("worker %s stopped", worker_id)
+    if args.once and failed:
+        # A scheduler (cron, GitHub Actions) should show this run as failed, not green.
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

@@ -64,6 +64,13 @@ class Settings(BaseSettings):
     reminder_max_attempts: int = 5
     reminder_lease_minutes: int = 5  # a claimed job is reclaimed if its worker goes quiet this long
 
+    @field_validator("resend_api_key", mode="before")
+    @classmethod
+    def _strip_key(cls, value: object) -> object:
+        # A key pasted into a host's secrets form often picks up a trailing newline, which
+        # would make the Authorization header invalid.
+        return value.strip() or None if isinstance(value, str) else value
+
     @field_validator("email_allowed_recipients", mode="before")
     @classmethod
     def _split_recipients(cls, value: object) -> object:

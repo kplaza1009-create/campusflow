@@ -589,6 +589,26 @@ def test_worker_command_line_once_and_resync(
     assert len((tmp_path / "captured-emails.jsonl").read_text().splitlines()) == 1
 
 
+def test_worker_once_exits_nonzero_when_a_batch_crashes(
+    api: Api, clock: Clock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A scheduled `--once` run must not look green when delivery blew up; the job stays leased."""
+
+    def boom(*_args: object, **_kwargs: object) -> dict[str, int]:
+        raise ValueError("Invalid header value")
+
+    monkeypatch.setattr("app.worker.run_once", boom)
+    with pytest.raises(SystemExit) as exc:
+        main(["--once"])
+    assert exc.value.code == 1
+
+
+def test_resend_key_whitespace_is_trimmed(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CAMPUSFLOW_RESEND_API_KEY", "re_test_123\n")
+    assert Settings().resend_api_key is not None
+    assert Settings().resend_api_key.get_secret_value() == "re_test_123"  # type: ignore[union-attr]
+
+
 # --- One delivery per logical reminder, across its whole lifecycle -------------------------
 #
 # A "logical reminder" is one channel, one lead time, and one deadline (for a date-only
