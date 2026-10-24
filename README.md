@@ -513,7 +513,6 @@ The Taste inspector reports 0 failures on every screen. The main remaining warni
 - Registering with an email that already exists says so. This lets someone check whether an address has an account, a tradeoff accepted for clearer sign-up errors. Registration is rate limited per IP.
 - The assignment list returns at most 500 rows with no pagination. That's fast at the [measured](docs/performance.md) size, but the 500-row response is the slowest request.
 - If the session expires while a form is open, saving shows a "sign in again" message and keeps the form, but signing in happens in a separate step.
-- Real reminder email through Resend is set up on the live site but hasn't been confirmed end to end yet. The adapter is tested against simulated responses, and the scheduled worker runs successfully against the production database.
 - The shared demo can be changed by anyone until the nightly reset, so a visitor may find it in an odd state.
 
 ## Project layout
