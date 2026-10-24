@@ -4,6 +4,8 @@ A college planner for keeping every course, class, and deadline in one place: wh
 
 Built as a full-stack portfolio project: a React + TypeScript frontend, a FastAPI backend, PostgreSQL, and a separate worker process that delivers durable reminders.
 
+**Try it:** [campusflow-zgs3.onrender.com](https://campusflow-zgs3.onrender.com), then press **Try the demo**. The free server sleeps when idle, so the first load can take about a minute. No sign-up needed. ([What the demo is](#the-shared-demo))
+
 ![Today view](docs/screenshots/today-light.png)
 
 ## Status
@@ -13,7 +15,7 @@ Built as a full-stack portfolio project: a React + TypeScript frontend, a FastAP
 | 1 | Accounts, courses, assignments, persistent storage | **Done** |
 | 2 | Weekly calendar, recurring classes, conflict detection | **Done** |
 | 3 | Durable reminders and notification settings | **Done** |
-| 4 | Demo account, deployment, usability, portfolio docs | Not started |
+| 4 | Demo account, deployment, usability, portfolio docs | **Done** |
 
 ## The problem
 
@@ -37,21 +39,41 @@ Students juggle deadlines from four to six courses, each with its own syllabus, 
 | ![Courses](docs/screenshots/courses-light.png) | ![Settings](docs/screenshots/settings-light.png) |
 | ![Notifications](docs/screenshots/notifications-light.png) | ![Reminder history in the edit dialog](docs/screenshots/reminder-history-light.png) |
 | ![Week in dark mode](docs/screenshots/week-dark.png) | ![Today in dark mode](docs/screenshots/today-dark.png) |
-| ![Sign in](docs/screenshots/login.png) | |
+| ![Sign in, with the demo entry](docs/screenshots/login.png) | ![The shared demo](docs/screenshots/demo-today-light.png) |
 
-<img src="docs/screenshots/today-phone.png" alt="Today on a phone" width="300"> <img src="docs/screenshots/agenda-phone.png" alt="The week as an agenda on a phone" width="300"> <img src="docs/screenshots/notifications-phone.png" alt="Notifications on a phone" width="300">
+<img src="docs/screenshots/today-phone.png" alt="Today on a phone" width="300"> <img src="docs/screenshots/agenda-phone.png" alt="The week as an agenda on a phone" width="300"> <img src="docs/screenshots/notifications-phone.png" alt="Notifications on a phone" width="300"> <img src="docs/screenshots/demo-phone.png" alt="The shared demo on a phone" width="300">
+
+## The shared demo
+
+**Try the demo** on the sign-in page signs you in to one shared sample account: five courses (one archived), fifteen assignments (two overdue, two due today), a weekly schedule with a deliberate clash (a Thursday lab overlapping a lecture), and an overnight study session. Every date is relative to the day it was built, so it never looks stale.
+
+- **It's a normal account.** `users.is_demo` grants nothing; the tests check the demo can't see anyone else's data. It only *removes* the abilities that would let one visitor spoil the demo for the next: changing the password, deleting the account, and turning on email.
+- **It's shared.** Everyone who tries it sees the same data and can change it, and a banner on every page says so.
+- **It resets every night** at 08:00 UTC (4:00 AM in New York during daylight time), when `python -m app.demo` deletes the account and everything in it and builds a fresh one. The banner shows the next reset in your time zone. A reset signs everyone out of it. If someone presses the button during the few seconds of a reset, they're asked to try again in a minute.
+- **It never sends email.** Its address uses the reserved `.invalid` domain, which can't receive mail and which sign-up rejects, and reminder planning never schedules email for it.
+- **One-click login is rate limited** (30 per hour per IP) so it can't be used to flood the sessions table.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-  B[Browser<br/>React + TypeScript] -- "/api/* (same origin in dev via Vite proxy)<br/>cookie + X-CSRF-Token" --> A[FastAPI API<br/>sync route handlers]
+  B[Browser<br/>React + TypeScript] -- "same origin: the app and /api/*<br/>cookie + X-CSRF-Token" --> A[FastAPI<br/>serves the API and the built frontend]
   A -- SQLAlchemy 2.x<br/>psycopg 3 --> D[(PostgreSQL 18)]
   W[Reminder worker<br/>python -m app.worker] -- "claims due jobs<br/>FOR UPDATE SKIP LOCKED" --> D
   W -- "HTTPS + Idempotency-Key<br/>(or local capture file)" --> R[Resend]
 ```
 
-One frontend, one API, one database, and one worker. The reminder queue is a PostgreSQL table, so there's no message broker to run.
+One frontend, one API, one database, and one worker. The reminder queue is a PostgreSQL table, so there's no message broker to run. In development the Vite dev server serves the frontend and proxies `/api`; in production FastAPI serves the built files itself. Either way the browser sees one origin.
+
+**In production** (all free tiers, see [Deployment](#deployment)):
+
+```mermaid
+flowchart LR
+  B[Browser] -- HTTPS --> RW["Render web service (free, Ohio)<br/>Docker: migrate, ensure demo, uvicorn"]
+  RW --> N[(Neon PostgreSQL 18<br/>us-east-2)]
+  GA["GitHub Actions schedule<br/>worker --once every 30 min<br/>demo reset nightly"] --> N
+  GA -- reminder email --> R[Resend]
+```
 
 **How a reminder flows:** saving an assignment (or completing it, archiving its course, changing your time zone or email setting) recalculates its reminder rows in the same transaction. The worker, a separate process, polls for rows whose time has come, claims them, rechecks the assignment, then writes an in-app notification or calls the email adapter, and records what happened. The browser polls Notifications once a minute.
 
@@ -199,9 +221,20 @@ uv run python -m app.worker                      # add --once to process what's 
 cd frontend
 npm ci
 npm run dev                                      # http://localhost:5173
+
+# Optional: the shared demo account (also what the nightly job runs)
+cd backend && uv run python -m app.demo
 ```
 
 The Vite dev server proxies `/api` to the API on port 8000, so the browser sees a single origin.
+
+To run it the way production does, one process serving everything:
+
+```bash
+cd frontend && npm run build
+cd ../backend && CAMPUSFLOW_FRONTEND_DIST=../frontend/dist uv run uvicorn app.main:app --port 8000
+# or the production image:  docker build -t campusflow . && docker run -p 8000:8000 -e CAMPUSFLOW_DATABASE_URL=... campusflow
+```
 
 ### Environment variables
 
@@ -218,10 +251,13 @@ All backend settings use the `CAMPUSFLOW_` prefix. See [`backend/.env.example`](
 | `CAMPUSFLOW_EMAIL_MODE` | `capture` | `capture` writes emails to a local file and sends nothing; `resend` sends |
 | `CAMPUSFLOW_RESEND_API_KEY` | none | Secret. Only needed with `EMAIL_MODE=resend` |
 | `CAMPUSFLOW_EMAIL_FROM` | `CampusFlow <onboarding@resend.dev>` | Resend's test sender works without a domain |
-| `CAMPUSFLOW_EMAIL_ALLOWED_RECIPIENTS` | empty (anyone) | JSON list. If set, email only goes to these addresses; others stay in-app |
+| `CAMPUSFLOW_EMAIL_ALLOWED_RECIPIENTS` | empty (anyone) | JSON list or comma-separated. If set, email only goes to these addresses; others stay in-app, and Settings tells them so |
 | `CAMPUSFLOW_REMINDER_MAX_ATTEMPTS` / `_LEASE_MINUTES` | 5 / 5 | Retry limit, and how long a claimed job waits before another worker may take it |
+| `CAMPUSFLOW_FRONTEND_DIST` | unset | Path to the built frontend. When set, the API serves it (production) |
+| `CAMPUSFLOW_TRUSTED_PROXY_HOPS` | `0` | Proxies in front of the app that append to `X-Forwarded-For` (Render: 2). Rate limits use the entry they added |
+| `CAMPUSFLOW_DEMO_ENABLED` / `_RESET_UTC_HOUR` | `true` / `8` | The shared demo, and the hour its nightly reset is shown for |
 
-No secrets are committed. `.env` files are git-ignored.
+No secrets are committed. `.env` files are git-ignored. A host-style `postgres://` or `postgresql://` URL (as Neon and Render hand out) is accepted and given the psycopg driver automatically.
 
 ## Testing and checks
 
@@ -236,14 +272,15 @@ cd frontend
 npm run format:check && npm run lint && npm run typecheck && npm run build
 npm test                          # calendar layout unit tests (Node's built-in runner)
 
-# Browser tests: start their own API (on a separate campusflow_e2e database) and dev server
+# Browser tests: build the frontend and serve it from FastAPI, as production does,
+# on a separate campusflow_e2e database
 npx playwright install chromium   # once
 npm run test:e2e
 ```
 
-GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs all three jobs on every push and pull request, with a PostgreSQL 18 service container.
+GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs four jobs on every push and pull request, with a PostgreSQL 18 service container: backend checks, frontend checks, the browser tests, and a Docker job that builds the production image, starts it with production settings, and smoke-tests it (health, the app shell on a deep link, security headers, and a demo sign-in).
 
-What the 143 backend tests cover (97% line coverage):
+What the 162 backend tests cover (97% line coverage):
 
 - **Auth:** HTTP-only cookie, email normalization, generic login errors, server-side logout (a replayed cookie fails), idle and absolute expiry, CSRF header required for writes, cross-origin writes rejected, login throttling that survives across clients, password change signing out other devices, account deletion.
 - **Isolation:** another user's records return 404 by ID for read, edit, complete, delete, archive, and deletion-impact. An assignment can't be attached to another user's course, and the database itself rejects such a row. Idempotency keys are scoped per user.
@@ -253,15 +290,69 @@ What the 143 backend tests cover (97% line coverage):
 - **Scheduling rules (pure functions, no database):** adjacent events don't conflict, a one-minute overlap does, overnight events clash with the next morning, weekly expansion stays inside both the window and the series dates, classes keep their local time through daylight saving, a class start in the spring-forward gap moves forward, a repeated fall-back time uses the first one, and a class defined in another zone keeps that zone's wall time.
 - **Reminders (53 tests):** each reminder delivered at most once: no second delivery after editing the title or description, saving unchanged settings, resyncing repeatedly before and after delivery, syncing while the worker holds the job, completing and reopening, a time zone change, or turning email on late, while a new deadline or lead time still gets its replacement; when reminders fire (9:00 AM for day-based leads on date-only deadlines, counting back from midnight for hour-based ones, immediately if the time has passed but the deadline hasn't); rescheduling on edit, completion, reopening, archiving, time zone changes, and email opt-in; four concurrent resyncs leaving exactly one pending reminder; three concurrent workers claiming 30 jobs with no job claimed twice; a crashed worker's job reclaimed after its lease, with the late worker unable to deliver it again; a job that keeps crashing its worker failing after 5 attempts; backoff of 1 then 4 minutes with a stable idempotency key across retries; permanent errors failing without retries; the outage policy; rechecking a reminder completed or rescheduled after it was claimed; provider confirmation moving `accepted` to `delivered` or `failed`; capture mode; the recipient allowlist; Resend request shape and error classification (with simulated HTTP); log masking; isolation between users; and the worker's command line.
 - **Migrations (7 tests, each on its own disposable database):** a database populated at the revision before reminder identity is upgraded with Alembic and then exercised with the real sync and worker code, with the clock at 2026-10-16 12:00 UTC: a deadline moved from Oct 15 (reminder sent) to Oct 20 keeps its Oct 20 replacement through repeated resyncs and delivers it exactly once, keeping delivery ids and notification links, both on a straight upgrade and on a database where the faulty backfill had already run; an unchanged deadline is never delivered again; a replacement the faulty identity already cancelled is restored by `--resync`; unverifiable records are flagged and kept; and a fresh install migrates up, down, and up again with no drift from the models.
+- **Demo account (8 tests):** the reset builds the documented data relative to today, wipes visitors' changes and signs everyone out, 503 while no demo exists, the per-IP rate limit, no password change, deletion, or email for the demo, no access to anyone else's data, no email even if the flag is forced on, and the reserved address can't be registered.
+- **Production plumbing:** host database URLs, the recipient allowlist format, rate limits that ignore `X-Forwarded-For` entries a visitor wrote, security headers on every response, serving the built frontend (deep links, immutable asset caching, `/api` 404s staying JSON, no path traversal), creating the demo only when missing, and Settings saying when this server can't email you.
 - **Calendar API:** validation (end after start, unique weekdays, series at most a year), conflict warnings for one-time and recurring events with **Save anyway**, deadlines that never block time, overnight events, editing a whole series, idempotent create, bounded windows, archived courses' events hidden and ignored for conflicts, events on Today, deleting a course with its events, and isolation between users.
 
-Eight frontend unit tests cover the week grid's geometry (overnight events split across two days, overlapping events side by side, adjacent ones not, the visible hour range) and when a time-based label must next update.
+Nine frontend unit tests cover the week grid's geometry (overnight events split across two days, overlapping events side by side, adjacent ones not, the visible hour range) and when a time-based label must next update.
 
-The Playwright test walks one student through the app: register, add a course, add an overdue assignment, trigger the duplicate warning and the discard prompt, add a weekly class and a clashing meeting on the calendar, save past the conflict warning and see both flagged in the agenda, search, complete, reload, sign out, and sign back in. A second test checks the wrong-password error. A third runs the whole reminder path: it creates an assignment whose reminder is due, runs the real worker process against the test database, finds the reminder in Notifications, opens it to see its delivery history, and checks that a second worker run delivers nothing twice. A fourth uses Playwright's controlled clock: it leaves Today open, moves time past an event's end, and checks that "Ended" appears without any request to the API.
+The Playwright test walks one student through the app: register, add a course, add an overdue assignment, trigger the duplicate warning and the discard prompt, add a weekly class and a clashing meeting on the calendar, save past the conflict warning and see both flagged in the agenda, search, complete, reload, sign out, and sign back in. A second test checks the wrong-password error. A third runs the whole reminder path: it creates an assignment whose reminder is due, runs the real worker process against the test database, finds the reminder in Notifications, opens it to see its delivery history, and checks that a second worker run delivers nothing twice. A fourth uses Playwright's controlled clock: it leaves Today open, moves time past an event's end, and checks that "Ended" appears without any request to the API. A demo test signs in with one click, checks the banner and the disabled settings, and scans it with axe. Two keyboard tests do the four [usability-test](docs/usability-test.md) tasks (create a course, add an assignment, schedule a conflicting event, find an overdue task) with the keyboard alone, checking that every control they reach shows a focus ring, and that Escape returns focus to whatever opened a dialog. Writing them found three real bugs, all fixed: the course color picker had nine Tab stops and no arrow keys, and closing a dialog or an inline form dropped focus to the top of the page.
 
-An automated accessibility scan ([`frontend/e2e/accessibility.spec.ts`](frontend/e2e/accessibility.spec.ts)) runs [axe-core](https://github.com/dequelabs/axe-core) against WCAG 2.2 AA on every page and dialog (sign-in and registration, Today, the week grid and agenda, assignments, courses, notifications, settings, the assignment dialog, and the event dialog showing a conflict warning) in light and dark mode, at desktop and phone widths: 48 scans per run. Any violation fails CI. Its first run found three real problems, all fixed: finished classes on Today were faded with opacity, which dropped their text below 4.5:1 contrast; deadline chips were smaller than the 24px minimum touch target; and the phone's "New" button had no clear name for screen readers. A scanner can't judge everything (whether a label makes sense, or whether a flow works by keyboard alone), so those still need a manual pass.
+An automated accessibility scan ([`frontend/e2e/accessibility.spec.ts`](frontend/e2e/accessibility.spec.ts)) runs [axe-core](https://github.com/dequelabs/axe-core) against WCAG 2.2 AA on every page and dialog (sign-in and registration, Today, the week grid and agenda, assignments, courses, notifications, settings, the assignment dialog, and the event dialog showing a conflict warning) in light and dark mode, at desktop and phone widths: 48 scans per run. Any violation fails CI, and so does anything the Content-Security-Policy blocks, since these tests run against the production build with its real headers. Its first run found three real problems, all fixed: finished classes on Today were faded with opacity, which dropped their text below 4.5:1 contrast; deadline chips were smaller than the 24px minimum touch target; and the phone's "New" button had no clear name for screen readers. A scanner can't judge everything (whether a label makes sense, or how a screen reader announces a flow), so that still needs a manual pass.
+
+## Deployment
+
+Everything runs on free tiers. Nothing here needs a credit card.
+
+| Piece | Where | How |
+| --- | --- | --- |
+| Web app and API | [Render](https://render.com) free web service, Ohio | [`Dockerfile`](Dockerfile), described by [`render.yaml`](render.yaml) |
+| Database | [Neon](https://neon.tech) free PostgreSQL 18, us-east-2 | Direct (unpooled) connection string |
+| Reminder worker | GitHub Actions, every 30 minutes | [`.github/workflows/scheduled.yml`](.github/workflows/scheduled.yml) runs `python -m app.worker --once` |
+| Nightly demo reset | GitHub Actions, 08:00 UTC | Same workflow, `python -m app.demo` |
+| Email | [Resend](https://resend.com) free plan | Test sender; delivers only to the account owner |
+
+**The image** builds the frontend in a Node stage, then installs the locked Python dependencies with uv and copies the built files in. On start it runs `alembic upgrade head`, creates the demo account if it doesn't exist yet (`python -m app.demo --if-missing`), and starts uvicorn as a non-root user. Migrations run at start rather than as a separate release step so it works the same on any host. That's safe here because the free plan runs a single instance.
+
+**First-time setup:**
+
+1. **Neon:** create a project with PostgreSQL 18 in us-east-2, and copy the *direct* connection string. Turn pooling off: the app sets the session time zone to UTC as a connection option, which a transaction pooler can drop.
+2. **Render:** go to New → Blueprint and pick this repository. Render reads `render.yaml` and asks for the two values that are kept out of git: `CAMPUSFLOW_DATABASE_URL` (the Neon string) and `CAMPUSFLOW_EMAIL_ALLOWED_RECIPIENTS` (the address you signed up to Resend with).
+3. **GitHub:** under Settings → Secrets and variables → Actions, add the secrets `CAMPUSFLOW_DATABASE_URL`, `CAMPUSFLOW_RESEND_API_KEY`, and `CAMPUSFLOW_EMAIL_ALLOWED_RECIPIENTS`, and the variable `CAMPUSFLOW_APP_URL` (the Render URL, used for links in emails).
+
+**Deploys:** every push to `main` builds and deploys on Render. Render waits for `/api/health`, which runs `SELECT 1` against the database, before switching traffic to the new version. To roll back, redeploy an earlier deploy from the Render dashboard. Migrations so far only add columns and tables, so the previous version still runs against the newer schema.
+
+**Logs:** the Render dashboard shows the app's logs. Each request is one line (`GET /api/today 200 12.3ms`), with the path only: no query strings, cookies, or bodies. Worker and demo-reset runs log to their GitHub Actions run, with each job's id, its outcome, and a masked address (`a***@example.edu`). To run either job right away, go to Actions → Scheduled jobs → Run workflow.
+
+**Limits of the free setup (read before relying on it):**
+
+- **The web service sleeps after 15 idle minutes.** The next visit wakes it, which takes about a minute.
+- **Reminders can be up to about 30 minutes late**, because the worker runs every 30 minutes instead of continuously, and GitHub can start scheduled runs later than planned. A late run still sends everything that came due, and the [outage policy](#durable-reminders) applies. The 30-minute interval is a deliberate budget choice. Each run wakes the database, which then stays up about 5 minutes, and Neon's free plan includes 100 compute-hours a month per project. At the smallest compute size, waking every 15 minutes would use about 60 of those just for the worker, and every 30 minutes about 30. (That's an estimate, not a measurement.)
+- **GitHub turns off scheduled workflows in a public repository after 60 days without activity.** Any push turns them back on.
+- **Email only reaches the Resend account owner** until a domain is verified. Everyone else's reminders stay in the app, and Settings tells them so instead of offering a switch that can't work.
+- **The demo is shared:** visitors can see each other's changes until the nightly reset.
+
+## Performance and usability
+
+- [`docs/performance.md`](docs/performance.md): the nine most common reads, timed against a synthetic dataset of 301 users and 46,500 assignments, with each query's plan. Every statement uses an index and runs in under 4 ms. The time per request (15–32 ms median) goes to Python, not the database.
+- [`docs/usability-test.md`](docs/usability-test.md): a 15-minute script for testing with classmates, covering creating a course, adding an assignment, scheduling a conflicting event, and finding an overdue task.
+- [`docs/feedback-log.md`](docs/feedback-log.md): the template for recording those sessions. It's empty because no sessions have been run yet.
 
 ## Key decisions
+
+### One origin in production
+
+FastAPI serves the built frontend as well as the API: real files as they are, any other path as `index.html` so the client-side router can handle deep links, and unknown `/api/...` paths stay JSON 404s. Fingerprinted files under `/assets` are cached for a year; everything else revalidates. One origin means the session cookie stays first-party (`SameSite=Lax`, `__Host-` prefix), there's no CORS, and the free plan only has to run one service. The tradeoff: static files are served by Python instead of a CDN, which is plenty for a planner and would be the first thing to move behind a CDN under real traffic.
+
+Every response carries security headers. The Content-Security-Policy allows scripts, fonts, and styles only from the same origin, plus inline styles, which the toast library injects. HSTS is sent in production. The browser tests run under this exact policy and fail on anything it blocks.
+
+### Client IPs behind a proxy
+
+Rate limits count per IP, but behind Render's proxies the TCP peer is a proxy, so every visitor would share one limit. The obvious fix, trusting `X-Forwarded-For`, is spoofable: a client can send its own header, and the proxies append to it rather than replacing it. So the app takes the entry exactly `CAMPUSFLOW_TRUSTED_PROXY_HOPS` places from the right, which is the one the platform's own proxy wrote. Anything further left is ignored. A test sends thirty demo logins with a different made-up address each time and still hits the limit. If the header ever has fewer entries than expected, the app logs a warning and falls back to one shared bucket, so the limit is never skipped.
+
+### Why a scheduled job instead of a worker service
+
+Render's free plan has no background workers, and a worker that polls all day would keep the free database awake around the clock. The worker was already built to run as `--once` (claim everything due, process it, exit) with leases that survive crashes. So a GitHub Actions schedule can run it with no code changes, and a paid worker service would run the same command in a loop. The cost is lateness (see [Deployment](#deployment)), not correctness: a reminder is still delivered at most once, and still not after its deadline.
 
 ### Synchronous SQLAlchemy with `def` route handlers
 
@@ -278,7 +369,7 @@ Two layers:
 1. Each session has its own CSRF token. The frontend gets it from `/api/auth/session` and sends it as `X-CSRF-Token` on every write. A malicious site can make the browser send the cookie, but it can't read the token.
 2. Middleware rejects any `POST`, `PUT`, `PATCH`, or `DELETE` whose `Origin` header isn't allow-listed. This covers login and registration, which happen before a session exists.
 
-CORS is configured explicitly for the same allow-list. It only matters if the frontend and API end up on different origins in production (decided in Milestone 4).
+CORS is configured explicitly for the same allow-list. Production serves the frontend and API from one origin, so the allow-list there is empty and CORS never comes into play.
 
 ### Login rate limiting in PostgreSQL
 
@@ -403,24 +494,27 @@ The interface follows three design skills: Impeccable's rules for product UI, Em
 
 The week grid follows the same rules: course colors appear only as event tints and deadline dots, conflicts get a red edge and a warning icon (never color alone), and phones get the agenda, a list that works with screen readers, instead of a cramped grid.
 
-The Taste inspector reports 0 failures on every screen. The main remaining warning is deliberate: calendar axis labels and event details use 12px text, because a week of classes has to fit on one screen. Editable designs (components, color variables, and the main screens in light and dark, including the week grid, the calendar event component, and the conflict dialog) live in a Figma file in the project owner's drafts.
+The Taste inspector reports 0 failures on every screen. The main remaining warning is deliberate: calendar axis labels and event details use 12px text, because a week of classes has to fit on one screen. Editable designs (components, color variables, and the main screens in light and dark, including the week grid, the calendar event component, the conflict dialog, Today's schedule, the shared-demo banner, and the demo versions of Today, Settings, and sign-in) live in a Figma file in the project owner's drafts.
 
-## Known limitations (as of Milestone 3)
+## Known limitations
 
-- Editing a weekly class changes every meeting, past and future. Skipping or moving a single meeting (a holiday, a moved lab) isn't supported yet.
+- Editing a weekly class changes every meeting, past and future. Skipping or moving a single meeting (a holiday, a moved lab) isn't supported.
 - Only weekly repetition. A series can run at most one year, and a one-time event at most 14 days.
 - Events of archived courses are hidden from the calendar until the course is restored.
 - Phones show the week as an agenda list only; the grid needs a wider screen.
-- Accessibility is scanned automatically, but hasn't yet had a full manual pass with a screen reader (VoiceOver, NVDA).
-- Real email delivery through Resend hasn't been exercised yet: the development environment can't reach `api.resend.com`, so the adapter is tested against simulated responses. It gets its first real send after deployment (Milestone 4).
+- Accessibility is scanned automatically and the main tasks are tested by keyboard, but it hasn't had a manual pass with a screen reader (VoiceOver, NVDA).
+- No usability sessions have been run yet. The script and log are ready, but there are no findings to report.
+- On the free deployment: cold starts after 15 idle minutes, reminders up to about 30 minutes late, and email only to the owner's address (see [Deployment](#deployment)).
 - One reminder per assignment, at fixed choices (1 hour to 1 week before). Emails are plain text.
 - Notifications refresh once a minute in the browser rather than being pushed.
 - Delivery confirmation is checked for 3 days after sending; later bounces aren't recorded.
 - If Resend's daily quota is used up, retries run out before the quota resets at midnight UTC, and the email is marked failed.
 - The "last course used" memory is per device (browser storage), not per account.
 - Registering with an email that already exists says so. This lets someone check whether an address has an account, a tradeoff accepted for clearer sign-up errors. Registration is rate limited per IP.
-- The assignment list returns at most 500 rows with no pagination. Performance with large datasets is measured in Milestone 4.
+- The assignment list returns at most 500 rows with no pagination. That's fast at the [measured](docs/performance.md) size, but the 500-row response is the slowest request.
 - If the session expires while a form is open, saving shows a "sign in again" message and keeps the form, but signing in happens in a separate step.
+- Real reminder email through Resend is set up on the live site but hasn't been confirmed end to end yet. The adapter is tested against simulated responses, and the scheduled worker runs successfully against the production database.
+- The shared demo can be changed by anyone until the nightly reset, so a visitor may find it in an odd state.
 
 ## Project layout
 
@@ -431,12 +525,17 @@ backend/
                   reminders.py (when reminders fire, keeping them in sync), worker.py (the worker process),
                   email.py (capture and Resend adapters)
   alembic/        migrations
-  scripts/        ensure_db.py
+                  demo.py (the shared demo account)
+  scripts/        ensure_db.py, perf.py (synthetic dataset and timings)
   tests/          pytest suite (disposable PostgreSQL per run)
 frontend/
   src/            React app: api.ts, pages/, components/, styles.css
                   calendarLayout.ts (+ .test.ts): week grid geometry
-  e2e/            Playwright tests
-docs/screenshots/
-.github/workflows/ci.yml
+  e2e/            Playwright tests (against the production build)
+docs/             performance.md, usability-test.md, feedback-log.md,
+                  interview-walkthrough.md, screenshots/
+Dockerfile        production image (frontend build + API)
+render.yaml       Render Blueprint
+.github/workflows/ci.yml          checks, browser tests, Docker smoke test
+.github/workflows/scheduled.yml   reminder worker and nightly demo reset
 ```
