@@ -254,7 +254,7 @@ All backend settings use the `CAMPUSFLOW_` prefix. See [`backend/.env.example`](
 | `CAMPUSFLOW_EMAIL_ALLOWED_RECIPIENTS` | empty (anyone) | JSON list or comma-separated. If set, email only goes to these addresses; others stay in-app, and Settings tells them so |
 | `CAMPUSFLOW_REMINDER_MAX_ATTEMPTS` / `_LEASE_MINUTES` | 5 / 5 | Retry limit, and how long a claimed job waits before another worker may take it |
 | `CAMPUSFLOW_FRONTEND_DIST` | unset | Path to the built frontend. When set, the API serves it (production) |
-| `CAMPUSFLOW_TRUSTED_PROXY_HOPS` | `0` | Proxies in front of the app that append to `X-Forwarded-For` (Render: 2). Rate limits use the entry they added |
+| `CAMPUSFLOW_TRUSTED_PROXY_HOPS` | `0` | Proxies in front of the app that append to `X-Forwarded-For` (Render: 3, measured from the live logs). Rate limits use the entry the first of them added |
 | `CAMPUSFLOW_DEMO_ENABLED` / `_RESET_UTC_HOUR` | `true` / `8` | The shared demo, and the hour its nightly reset is shown for |
 
 No secrets are committed. `.env` files are git-ignored. A host-style `postgres://` or `postgresql://` URL (as Neon and Render hand out) is accepted and given the psycopg driver automatically.

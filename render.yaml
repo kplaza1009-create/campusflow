@@ -27,6 +27,6 @@ services:
       - key: CAMPUSFLOW_ALLOWED_ORIGINS
         value: "[]" # same origin only
       - key: CAMPUSFLOW_TRUSTED_PROXY_HOPS
-        value: "2"
+        value: "3" # measured on Render: 3 entries arrive (client + 2 proxies)
       - key: CAMPUSFLOW_LOG_LEVEL
         value: INFO
